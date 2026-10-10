@@ -1,4 +1,5 @@
-import numpy as np 
+
+ import numpy as np 
 from sklearn.ensemble import IsolationForest 
  
 def detect_anomalies(parsed_logs: list) -> list: 
@@ -15,5 +16,6 @@ def detect_anomalies(parsed_logs: list) -> list:
  
     for idx, log in enumerate(parsed_logs): 
         log["is_anomaly"] = True if predictions[idx] == -1 else False 
+
  
     return parsed_logs
