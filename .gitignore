@@ -2,3 +2,6 @@ pycache/
 
 data/*.csv\n__pycache__/
 *.pyc
+data/Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv
+.gitignore
+data/Monday-WorkingHours.pcap_ISCX.csv
