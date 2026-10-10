@@ -1,4 +1,5 @@
-import numpy as np 
+
+ import numpy as np 
 from sklearn.ensemble import IsolationForest 
  
 def detect_anomalies(parsed_logs: list) -> list: 
