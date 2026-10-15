@@ -5,3 +5,6 @@ data/*.csv\n__pycache__/
 data/Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv
 .gitignore
 data/Monday-WorkingHours.pcap_ISCX.csv
+node_modules/
+.env.local
+.next/
