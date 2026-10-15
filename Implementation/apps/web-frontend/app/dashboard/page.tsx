@@ -10,7 +10,7 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">
-            Dashboard
+            Dashboard rocks
           </h1>
         </div>
         <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
