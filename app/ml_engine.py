@@ -32,11 +32,9 @@ def load_and_clean_data():
     print("[*] Loading datasets...") 
     df_list = [] 
 
-    # Load Monday (Benign) and Friday (DDoS) datasets 
     for file_path in [MONDAY_CSV, FRIDAY_CSV]: 
         if os.path.exists(file_path): 
             print(f"[*] Reading file: {file_path} (loading 20,000 rows)...") 
-            # Limit rows to 20,000 per file for fast training
             df_temp = pd.read_csv(file_path, nrows=20000) 
             df_list.append(df_temp) 
             print(f"[+] Loaded {len(df_temp)} rows successfully.")
@@ -47,16 +45,10 @@ def load_and_clean_data():
         raise FileNotFoundError("No valid CSV files found in the data/ directory.") 
 
     print("[*] Combining and preprocessing data...")
-    # Combine datasets 
     df = pd.concat(df_list, ignore_index=True) 
-    
-    # Clean column names (strip whitespace)
     df.columns = df.columns.str.strip() 
 
-    # Extract key features
     X = df[SELECTED_FEATURES].copy() 
-
-    # Handle Inf and NaN values
     X.replace([np.inf, -np.inf], np.nan, inplace=True) 
     X.fillna(X.median(), inplace=True) 
 
@@ -68,7 +60,6 @@ def train_isolation_forest():
     X_train = load_and_clean_data() 
     
     print("[*] Training Isolation Forest model (this takes ~5-10 seconds)...") 
-    # Use n_jobs=1 to avoid Windows multiprocessing deadlock
     model = IsolationForest( 
         n_estimators=100, 
         contamination=0.05, 
@@ -78,10 +69,45 @@ def train_isolation_forest():
     model.fit(X_train) 
     print("[+] Model training successful!") 
 
-    # Ensure app/models directory exists and save the trained model 
     os.makedirs(MODEL_DIR, exist_ok=True) 
     joblib.dump(model, MODEL_SAVE_PATH) 
-    print(f"[+] Model saved successfully to: {MODEL_SAVE_PATH}") 
+    print(f"[+] Model saved successfully to: {MODEL_SAVE_PATH}")
+
+
+# ==========================================
+# RUNTIME INFERENCE ENGINE (Used by FastAPI)
+# ==========================================
+class MLEngine:
+    def __init__(self):
+        if os.path.exists(MODEL_SAVE_PATH):
+            self.model = joblib.load(MODEL_SAVE_PATH)
+            print(f"[*] Successfully loaded saved Isolation Forest model for inference.")
+        else:
+            self.model = None
+            print(f"[-] WARNING: Saved model not found at {MODEL_SAVE_PATH}. Train the model first!")
+
+    def predict_log(self, row_data: dict):
+        """Extracts selected features from an incoming log row and runs inference."""
+        if not self.model:
+            return False, 0.0
+        
+        # Extract features in the exact order they were trained on
+        try:
+            features = [float(row_data.get(feat, 0)) for feat in SELECTED_FEATURES]
+        except (ValueError, TypeError):
+            features = [0.0] * len(SELECTED_FEATURES)
+
+        arr = np.array([features])
+        prediction = self.model.predict(arr)[0]  # -1 = anomaly/attack, 1 = benign
+        score = self.model.decision_function(arr)[0]
+        
+        is_attack = bool(prediction == -1)
+        return is_attack, float(score)
+
+# Global instance imported by FastAPI
+ml_engine = MLEngine()
+
 
 if __name__ == "__main__": 
+    # If you run `python ml_engine.py` directly, it trains and saves the model
     train_isolation_forest()
