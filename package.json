@@ -1,6 +1,9 @@
 {
   "dependencies": {
     "@clerk/nextjs": "^7.9.15",
-    "@clerk/themes": "^2.4.57"
+    "@clerk/themes": "^2.4.57",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.59.0",
+    "tailwind-merge": "^3.7.0"
   }
 }
