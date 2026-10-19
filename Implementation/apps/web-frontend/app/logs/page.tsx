@@ -22,7 +22,7 @@ export default function LogsPage() {
       const data = JSON.parse(event.data);
       if (data.type === "ATTACK_DETECTED") {
         const newLog: LogEntry = {
-          id: Math.random().toString(36.substring(2, 9)),
+          id: Math.random().toString(36).substring(2, 9),
           timestamp: data.timestamp || new Date().toLocaleString(),
           label: data.label || "Anomaly",
           destination_port: data.destination_port ?? 80,
