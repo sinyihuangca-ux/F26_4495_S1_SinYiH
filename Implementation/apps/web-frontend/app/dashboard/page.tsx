@@ -1,14 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Bot, Key, ShieldAlert, Sparkles } from "lucide-react";
+
+interface RankedAttack {
+  attack_type: string;
+  severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  count: number;
+  advice: string;
+}
 
 export default function DashboardPage() {
-  const [alerts, setAlerts] = useState<any[]>([]);
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
+  const [rawThreatCounts, setRawThreatCounts] = useState<Record<string, number>>({});
+  const [apiKey, setApiKey] = useState<string>("");
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [rankedAttacks, setRankedAttacks] = useState<RankedAttack[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
-    // Connect to FastAPI WebSocket server 
-    // (If viewing from another PC, replace 'localhost' with your server PC IP)
+    const savedKey = localStorage.getItem("GEMINI_API_KEY") || "";
+    setApiKey(savedKey);
+
     const ws = new WebSocket("ws://192.168.1.75:8000/ws/alerts");
 
     ws.onopen = () => {
@@ -19,8 +32,11 @@ export default function DashboardPage() {
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "ATTACK_DETECTED") {
-        // Prepend new alert to the top of the feed (keeping max 20 recent alerts)
-        setAlerts((prev) => [data, ...prev.slice(0, 19)]);
+        const type = data.label || "Unknown Threat";
+        setRawThreatCounts((prev) => ({
+          ...prev,
+          [type]: (prev[type] || 0) + 1,
+        }));
       }
     };
 
@@ -34,15 +50,101 @@ export default function DashboardPage() {
     };
   }, []);
 
+  const saveApiKey = (key: string) => {
+    setApiKey(key);
+    localStorage.setItem("GEMINI_API_KEY", key);
+    setShowKeyInput(false);
+  };
+
+  const runAiAdvisorAnalysis = async () => {
+    if (!apiKey) {
+      setShowKeyInput(true);
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const prompt = `You are a Senior Cybersecurity AI Advisor. Analyze these active network threats captured in real time: ${JSON.stringify(rawThreatCounts)}. 
+      Return ONLY a raw valid JSON array (no markdown code blocks, no backticks) sorted strictly by severity (CRITICAL first, then HIGH, MEDIUM, LOW) in this exact structure:
+      [
+        {
+          "attack_type": "DDoS",
+          "severity": "CRITICAL",
+          "count": 15,
+          "advice": "Apply rate-limiting rules at firewall and enable cloud scrubbing."
+        }
+      ]`;
+
+      // Google Gemini API endpoint call
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+          }
+        }),
+      });
+
+      const data = await res.json();
+      const textResponse = data.candidates[0].content.parts[0].text;
+      
+      // Clean up markdown block format if Gemini includes it
+      const cleanedJson = textResponse.replace(/```json|```/g, "").trim();
+      const parsed: RankedAttack[] = JSON.parse(cleanedJson);
+      
+      setRankedAttacks(parsed);
+    } catch (err) {
+      console.error("Gemini AI Analysis failed:", err);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const getSeverityBadge = (severity: string) => {
+    switch (severity) {
+      case "CRITICAL":
+        return "bg-red-500/20 text-red-400 border-red-500/30";
+      case "HIGH":
+        return "bg-orange-500/20 text-orange-400 border-orange-500/30";
+      case "MEDIUM":
+        return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+      default:
+        return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+    }
+  };
+
+  const totalThreats = Object.values(rawThreatCounts).reduce((a, b) => a + b, 0);
+
   return (
     <div className="p-8 space-y-8 bg-slate-950 min-h-screen text-slate-100">
       {/* Header & Status Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-800 pb-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight">Security Command Dashboard</h1>
-          <p className="text-sm text-slate-400 mt-1">Real-Time AI Anomaly Detection & Threat Mitigation</p>
+          <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
+            <Bot className="text-purple-400" /> AI Security Advisor Dashboard
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">Powered by Gemini AI threat intelligence & advisory briefings</p>
         </div>
         <div className="mt-4 sm:mt-0 flex items-center gap-3">
+          <button
+            onClick={() => setShowKeyInput(!showKeyInput)}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-xs transition border border-slate-700"
+          >
+            <Key size={14} /> {apiKey ? "Update Gemini Key" : "Add Gemini Key"}
+          </button>
+
+          <button
+            onClick={runAiAdvisorAnalysis}
+            disabled={isAnalyzing || totalThreats === 0}
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 px-4 py-1.5 rounded-lg text-xs font-medium transition"
+          >
+            <Sparkles size={14} /> {isAnalyzing ? "Analyzing..." : "Analyze Priority"}
+          </button>
+
           <span className="text-xs font-mono px-3 py-1 bg-slate-900 border border-slate-800 rounded-full flex items-center gap-2">
             <span className={`h-2 w-2 rounded-full ${connectionStatus.includes("Connected") ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`} />
             {connectionStatus}
@@ -50,41 +152,62 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Live Threat Feed Section */}
+      {showKeyInput && (
+        <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex gap-3">
+          <input
+            type="password"
+            placeholder="Enter your Gemini API key (AIza...)"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-white focus:outline-none"
+          />
+          <button
+            onClick={() => saveApiKey(apiKey)}
+            className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            Save Key
+          </button>
+        </div>
+      )}
+
+      {/* AI Security Advisor Advisory List */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-xl backdrop-blur-sm">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h2 className="text-lg font-bold">Live Threat Log Feed</h2>
-            <p className="text-xs text-slate-400">Incoming network flow anomalies flagged by Isolation Forest ML Engine</p>
+            <h2 className="text-lg font-bold">Severity-Ranked Threat Briefing</h2>
+            <p className="text-xs text-slate-400">Gemini advisor recommendations ordered by operational risk</p>
           </div>
-          <span className="text-xs font-mono bg-red-950/60 border border-red-800 text-red-400 px-3 py-1 rounded-md">
-            {alerts.length} Threats Captured
+          <span className="text-xs font-mono bg-purple-950/60 border border-purple-800 text-purple-300 px-3 py-1 rounded-md">
+            {totalThreats} Total Events Processed
           </span>
         </div>
 
-        <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-          {alerts.length === 0 ? (
+        <div className="space-y-4">
+          {rankedAttacks.length === 0 ? (
             <div className="text-center py-16 border border-dashed border-slate-800 rounded-lg">
-              <p className="text-sm text-slate-500 font-medium">No active threats detected. System secure.</p>
-              <p className="text-xs text-slate-600 mt-1">Run your attack simulator on PC #2 to stream traffic.</p>
+              <ShieldAlert size={40} className="mx-auto mb-3 text-slate-600" />
+              <p className="text-sm text-slate-400 font-medium">No Gemini AI severity analysis generated yet.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Stream live threats, input your Gemini API key, and click <strong>"Analyze Priority"</strong>.
+              </p>
             </div>
           ) : (
-            alerts.map((alert, idx) => (
-              <div 
-                key={idx} 
-                className="p-4 bg-red-950/20 border border-red-900/40 rounded-lg flex flex-col sm:flex-row justify-between sm:items-center gap-4 transition-all hover:bg-red-950/30"
+            rankedAttacks.map((item, idx) => (
+              <div
+                key={idx}
+                className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
               >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 bg-red-600 text-white text-xs font-bold rounded">ALERT</span>
-                    <span className="font-bold text-red-400 tracking-wide">{alert.label}</span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${getSeverityBadge(item.severity)}`}>
+                      #{idx + 1} {item.severity}
+                    </span>
+                    <h3 className="font-bold text-lg text-white">{item.attack_type}</h3>
+                    <span className="text-xs font-mono text-slate-400">({item.count} occurrences)</span>
                   </div>
-                  <p className="text-xs text-slate-400 font-mono">
-                    Destination Port: <span className="text-slate-200">{alert.destination_port}</span> | Anomaly Score: <span className="text-slate-200">{alert.score.toFixed(3)}</span>
+                  <p className="text-xs text-slate-300 font-mono bg-slate-900 p-2.5 rounded border border-slate-800">
+                    💡 <strong>Advisor Mitigation:</strong> {item.advice}
                   </p>
-                </div>
-                <div className="text-right">
-                  <span className="text-xs font-mono text-slate-500">{alert.timestamp}</span>
                 </div>
               </div>
             ))
