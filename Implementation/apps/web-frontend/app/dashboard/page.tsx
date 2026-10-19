@@ -9,7 +9,7 @@ export default function DashboardPage() {
   useEffect(() => {
     // Connect to FastAPI WebSocket server 
     // (If viewing from another PC, replace 'localhost' with your server PC IP)
-    const ws = new WebSocket("ws://localhost:8000/ws/alerts");
+    const ws = new WebSocket("ws://192.168.1.75:8000/ws/alerts");
 
     ws.onopen = () => {
       setConnectionStatus("Connected (Live)");
