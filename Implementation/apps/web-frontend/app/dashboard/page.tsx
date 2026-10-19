@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Key, ShieldAlert, Sparkles } from "lucide-react";
+import { Bot, Key, ShieldAlert, Sparkles, CheckCircle2 } from "lucide-react";
 
 interface RankedAttack {
   attack_type: string;
@@ -14,13 +14,17 @@ export default function DashboardPage() {
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
   const [rawThreatCounts, setRawThreatCounts] = useState<Record<string, number>>({});
   const [apiKey, setApiKey] = useState<string>("");
+  const [tempKeyInput, setTempKeyInput] = useState<string>("");
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [rankedAttacks, setRankedAttacks] = useState<RankedAttack[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
     const savedKey = localStorage.getItem("GEMINI_API_KEY") || "";
-    setApiKey(savedKey);
+    if (savedKey) {
+      setApiKey(savedKey);
+      setTempKeyInput(savedKey);
+    }
 
     const ws = new WebSocket("ws://192.168.1.75:8000/ws/alerts");
 
@@ -51,13 +55,16 @@ export default function DashboardPage() {
   }, []);
 
   const saveApiKey = (key: string) => {
-    setApiKey(key);
-    localStorage.setItem("GEMINI_API_KEY", key);
+    const trimmed = key.trim();
+    if (!trimmed) return;
+    setApiKey(trimmed);
+    localStorage.setItem("GEMINI_API_KEY", trimmed);
     setShowKeyInput(false);
   };
 
   const runAiAdvisorAnalysis = async () => {
-    if (!apiKey) {
+    const activeKey = apiKey || localStorage.getItem("GEMINI_API_KEY");
+    if (!activeKey) {
       setShowKeyInput(true);
       return;
     }
@@ -75,8 +82,8 @@ export default function DashboardPage() {
         }
       ]`;
 
-      // Google Gemini API endpoint call
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      // Official free-tier active endpoint
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${activeKey}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -90,15 +97,21 @@ export default function DashboardPage() {
       });
 
       const data = await res.json();
-      const textResponse = data.candidates[0].content.parts[0].text;
       
-      // Clean up markdown block format if Gemini includes it
+      if (data.error) {
+        alert(`Gemini API Error: ${data.error.message}`);
+        setIsAnalyzing(false);
+        return;
+      }
+
+      const textResponse = data.candidates[0].content.parts[0].text;
       const cleanedJson = textResponse.replace(/```json|```/g, "").trim();
       const parsed: RankedAttack[] = JSON.parse(cleanedJson);
       
       setRankedAttacks(parsed);
     } catch (err) {
       console.error("Gemini AI Analysis failed:", err);
+      alert("Failed to analyze threats. Check the browser console for details.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -132,9 +145,12 @@ export default function DashboardPage() {
         <div className="mt-4 sm:mt-0 flex items-center gap-3">
           <button
             onClick={() => setShowKeyInput(!showKeyInput)}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-xs transition border border-slate-700"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition border ${
+              apiKey ? "bg-emerald-950/40 border-emerald-800 text-emerald-400" : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+            }`}
           >
-            <Key size={14} /> {apiKey ? "Update Gemini Key" : "Add Gemini Key"}
+            {apiKey ? <CheckCircle2 size={14} /> : <Key size={14} />} 
+            {apiKey ? "Gemini Key Active" : "Add Gemini Key"}
           </button>
 
           <button
@@ -153,17 +169,17 @@ export default function DashboardPage() {
       </div>
 
       {showKeyInput && (
-        <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex gap-3">
+        <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex gap-3 items-center">
           <input
             type="password"
             placeholder="Enter your Gemini API key (AIza...)"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-white focus:outline-none"
+            value={tempKeyInput}
+            onChange={(e) => setTempKeyInput(e.target.value)}
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-purple-500"
           />
           <button
-            onClick={() => saveApiKey(apiKey)}
-            className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium"
+            onClick={() => saveApiKey(tempKeyInput)}
+            className="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg text-sm font-medium transition"
           >
             Save Key
           </button>
@@ -188,7 +204,7 @@ export default function DashboardPage() {
               <ShieldAlert size={40} className="mx-auto mb-3 text-slate-600" />
               <p className="text-sm text-slate-400 font-medium">No Gemini AI severity analysis generated yet.</p>
               <p className="text-xs text-slate-500 mt-1">
-                Stream live threats, input your Gemini API key, and click <strong>"Analyze Priority"</strong>.
+                {!apiKey ? "Please add your Gemini API key using the button above, then click" : "Stream live threats and click"} <strong>"Analyze Priority"</strong>.
               </p>
             </div>
           ) : (
