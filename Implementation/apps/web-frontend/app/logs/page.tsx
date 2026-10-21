@@ -16,7 +16,11 @@ export default function LogsPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    const ws = new WebSocket("ws://192.168.1.75:8000/ws/alerts");
+    const savedIp = localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
+    const formattedHost = savedIp.replace(/^https?:\/\//, "").replace(/^ws:\/\//, "").trim();
+    const wsUrl = `ws://${formattedHost}/ws/alerts`;
+
+    const ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
