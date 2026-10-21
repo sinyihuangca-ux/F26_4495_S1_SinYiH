@@ -63,6 +63,17 @@ export default function DashboardPage() {
           ...prev,
           [type]: (prev[type] || 0) + 1,
         }));
+
+        // Save incoming alert to global persistent log history in localStorage
+        const existingLogs = JSON.parse(localStorage.getItem("SECURITY_LOG_HISTORY") || "[]");
+        const newLogEntry = {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: data.timestamp || new Date().toLocaleString(),
+          label: type,
+          destination_port: data.destination_port ?? 80,
+          score: data.score ?? 0,
+        };
+        localStorage.setItem("SECURITY_LOG_HISTORY", JSON.stringify([newLogEntry, ...existingLogs]));
       }
     };
 
