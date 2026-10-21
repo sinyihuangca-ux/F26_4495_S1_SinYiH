@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, FileText, Search, ShieldAlert } from "lucide-react";
+import { Download, FileText, Search, ShieldAlert, Trash2 } from "lucide-react";
 
 interface LogEntry {
   id: string;
@@ -15,7 +15,11 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [search, setSearch] = useState("");
 
+  // Load existing logs from localStorage on mount and listen to WebSocket stream
   useEffect(() => {
+    const savedLogs = JSON.parse(localStorage.getItem("SECURITY_LOG_HISTORY") || "[]");
+    setLogs(savedLogs);
+
     const savedIp = localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
     const formattedHost = savedIp.replace(/^https?:\/\//, "").replace(/^ws:\/\//, "").trim();
     const wsUrl = `ws://${formattedHost}/ws/alerts`;
@@ -32,12 +36,24 @@ export default function LogsPage() {
           destination_port: data.destination_port ?? 80,
           score: data.score ?? 0,
         };
-        setLogs((prev) => [newLog, ...prev]);
+
+        setLogs((prev) => {
+          const updated = [newLog, ...prev];
+          localStorage.setItem("SECURITY_LOG_HISTORY", JSON.stringify(updated));
+          return updated;
+        });
       }
     };
 
     return () => ws.close();
   }, []);
+
+  const clearLogs = () => {
+    if (confirm("Are you sure you want to clear all audit logs?")) {
+      setLogs([]);
+      localStorage.removeItem("SECURITY_LOG_HISTORY");
+    }
+  };
 
   const exportToCSV = () => {
     if (logs.length === 0) return;
@@ -78,6 +94,14 @@ export default function LogsPage() {
         </div>
         <div className="mt-4 sm:mt-0 flex items-center gap-3">
           <button
+            onClick={clearLogs}
+            disabled={logs.length === 0}
+            className="flex items-center gap-2 bg-red-950/40 border border-red-800/60 hover:bg-red-900/40 text-red-400 disabled:opacity-50 px-3 py-2 rounded-lg text-sm font-medium transition"
+          >
+            <Trash2 size={16} /> Clear Logs
+          </button>
+
+          <button
             onClick={exportToCSV}
             disabled={logs.length === 0}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 px-4 py-2 rounded-lg text-sm font-medium transition"
@@ -114,7 +138,7 @@ export default function LogsPage() {
             {filteredLogs.length === 0 ? (
               <tr>
                 <td colSpan={4} className="p-12 text-center text-slate-500 font-medium">
-                  No log entries recorded yet.
+                  No log entries recorded yet. Run your attack simulator to stream threats!
                 </td>
               </tr>
             ) : (
