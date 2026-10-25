@@ -32,7 +32,7 @@ export function Sidebar() {
         <div>
           <span className="font-bold text-white tracking-wide">AI</span>
           <span className="text-xs text-sky-400 block font-medium">
-            Fortress
+            {process.env.NEXT_PUBLIC_APP_NAME}
           </span>
         </div>
       </div>
