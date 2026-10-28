@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Key, ShieldAlert, Sparkles, CheckCircle2, Server } from "lucide-react";
+import {
+  Bot,
+  Key,
+  ShieldAlert,
+  Sparkles,
+  CheckCircle2,
+  Server,
+} from "lucide-react";
 
 interface RankedAttack {
   attack_type: string;
@@ -12,8 +19,10 @@ interface RankedAttack {
 
 export default function DashboardPage() {
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
-  const [rawThreatCounts, setRawThreatCounts] = useState<Record<string, number>>({});
-  
+  const [rawThreatCounts, setRawThreatCounts] = useState<
+    Record<string, number>
+  >({});
+
   // IP and API Key configuration state
   const [serverIp, setServerIp] = useState<string>("localhost:8000");
   const [tempIpInput, setTempIpInput] = useState<string>("");
@@ -28,7 +37,8 @@ export default function DashboardPage() {
 
   // Initialize saved configurations & WebSocket connection
   useEffect(() => {
-    const savedIp = localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
+    const savedIp =
+      localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
     setServerIp(savedIp);
     setTempIpInput(savedIp);
 
@@ -44,7 +54,10 @@ export default function DashboardPage() {
     if (!serverIp) return;
 
     // Clean IP string (remove protocol if included by accident)
-    const formattedHost = serverIp.replace(/^https?:\/\//, "").replace(/^ws:\/\//, "").trim();
+    const formattedHost = serverIp
+      .replace(/^https?:\/\//, "")
+      .replace(/^ws:\/\//, "")
+      .trim();
     const wsUrl = `ws://${formattedHost}/ws/alerts`;
 
     console.log(`[+] Attempting WebSocket connection to: ${wsUrl}`);
@@ -65,7 +78,9 @@ export default function DashboardPage() {
         }));
 
         // Save incoming alert to global persistent log history in localStorage
-        const existingLogs = JSON.parse(localStorage.getItem("SECURITY_LOG_HISTORY") || "[]");
+        const existingLogs = JSON.parse(
+          localStorage.getItem("SECURITY_LOG_HISTORY") || "[]",
+        );
         const newLogEntry = {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: data.timestamp || new Date().toLocaleString(),
@@ -73,7 +88,10 @@ export default function DashboardPage() {
           destination_port: data.destination_port ?? 80,
           score: data.score ?? 0,
         };
-        localStorage.setItem("SECURITY_LOG_HISTORY", JSON.stringify([newLogEntry, ...existingLogs]));
+        localStorage.setItem(
+          "SECURITY_LOG_HISTORY",
+          JSON.stringify([newLogEntry, ...existingLogs]),
+        );
       }
     };
 
@@ -123,18 +141,21 @@ export default function DashboardPage() {
         }
       ]`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${activeKey}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${activeKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.2,
+            },
+          }),
         },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-          }
-        }),
-      });
+      );
 
       const data = await res.json();
 
@@ -151,7 +172,9 @@ export default function DashboardPage() {
       setRankedAttacks(parsed);
     } catch (err) {
       console.error("Gemini AI Analysis failed:", err);
-      alert("Failed to analyze threats. Check the browser console for details.");
+      alert(
+        "Failed to analyze threats. Check the browser console for details.",
+      );
     } finally {
       setIsAnalyzing(false);
     }
@@ -170,7 +193,10 @@ export default function DashboardPage() {
     }
   };
 
-  const totalThreats = Object.values(rawThreatCounts).reduce((a, b) => a + b, 0);
+  const totalThreats = Object.values(rawThreatCounts).reduce(
+    (a, b) => a + b,
+    0,
+  );
 
   return (
     <div className="p-8 space-y-8 bg-slate-950 min-h-screen text-slate-100">
@@ -180,7 +206,9 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
             <Bot className="text-purple-400" /> AI Security Advisor Dashboard
           </h1>
-          <p className="text-sm text-slate-400 mt-1">Powered by Gemini AI threat intelligence & advisory briefings</p>
+          <p className="text-sm text-slate-400 mt-1">
+            Powered by Gemini AI threat intelligence & advisory briefings
+          </p>
         </div>
         <div className="mt-4 sm:mt-0 flex items-center gap-3">
           {/* Server IP Config Button */}
@@ -201,10 +229,12 @@ export default function DashboardPage() {
               setShowIpInput(false);
             }}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition border ${
-              apiKey ? "bg-emerald-950/40 border-emerald-800 text-emerald-400" : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+              apiKey
+                ? "bg-emerald-950/40 border-emerald-800 text-emerald-400"
+                : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
             }`}
           >
-            {apiKey ? <CheckCircle2 size={14} /> : <Key size={14} />} 
+            {apiKey ? <CheckCircle2 size={14} /> : <Key size={14} />}
             {apiKey ? "Gemini Key Active" : "Add Gemini Key"}
           </button>
 
@@ -213,11 +243,14 @@ export default function DashboardPage() {
             disabled={isAnalyzing || totalThreats === 0}
             className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 px-4 py-1.5 rounded-lg text-xs font-medium transition"
           >
-            <Sparkles size={14} /> {isAnalyzing ? "Analyzing..." : "Analyze Priority"}
+            <Sparkles size={14} />{" "}
+            {isAnalyzing ? "Analyzing..." : "Analyze Priority"}
           </button>
 
           <span className="text-xs font-mono px-3 py-1 bg-slate-900 border border-slate-800 rounded-full flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${connectionStatus.includes("Connected") ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`} />
+            <span
+              className={`h-2 w-2 rounded-full ${connectionStatus.includes("Connected") ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`}
+            />
             {connectionStatus}
           </span>
         </div>
@@ -226,7 +259,9 @@ export default function DashboardPage() {
       {/* Input Drawer for Server IP */}
       {showIpInput && (
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex gap-3 items-center">
-          <label className="text-xs text-slate-400 font-mono whitespace-nowrap">FastAPI Host:</label>
+          <label className="text-xs text-slate-400 font-mono whitespace-nowrap">
+            FastAPI Host:
+          </label>
           <input
             type="text"
             placeholder="e.g. 192.168.1.75:8000 or localhost:8000"
@@ -266,8 +301,12 @@ export default function DashboardPage() {
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-xl backdrop-blur-sm">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h2 className="text-lg font-bold">Severity-Ranked Threat Briefing</h2>
-            <p className="text-xs text-slate-400">Gemini advisor recommendations ordered by operational risk</p>
+            <h2 className="text-lg font-bold">
+              Severity-Ranked Threat Briefing
+            </h2>
+            <p className="text-xs text-slate-400">
+              Gemini advisor recommendations ordered by operational risk
+            </p>
           </div>
           <span className="text-xs font-mono bg-purple-950/60 border border-purple-800 text-purple-300 px-3 py-1 rounded-md">
             {totalThreats} Total Events Processed
@@ -278,9 +317,14 @@ export default function DashboardPage() {
           {rankedAttacks.length === 0 ? (
             <div className="text-center py-16 border border-dashed border-slate-800 rounded-lg">
               <ShieldAlert size={40} className="mx-auto mb-3 text-slate-600" />
-              <p className="text-sm text-slate-400 font-medium">No Gemini AI severity analysis generated yet.</p>
+              <p className="text-sm text-slate-400 font-medium">
+                No Gemini AI severity analysis generated yet.
+              </p>
               <p className="text-xs text-slate-500 mt-1">
-                {!apiKey ? "Please add your Gemini API key using the button above, then click" : "Stream live threats and click"} <strong>"Analyze Priority"</strong>.
+                {!apiKey
+                  ? "Please add your Gemini API key using the button above, then click"
+                  : "Stream live threats and click"}{" "}
+                <strong>"Analyze Priority"</strong>.
               </p>
             </div>
           ) : (
@@ -291,11 +335,17 @@ export default function DashboardPage() {
               >
                 <div className="space-y-2">
                   <div className="flex items-center gap-3">
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${getSeverityBadge(item.severity)}`}>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${getSeverityBadge(item.severity)}`}
+                    >
                       #{idx + 1} {item.severity}
                     </span>
-                    <h3 className="font-bold text-lg text-white">{item.attack_type}</h3>
-                    <span className="text-xs font-mono text-slate-400">({item.count} occurrences)</span>
+                    <h3 className="font-bold text-lg text-white">
+                      {item.attack_type}
+                    </h3>
+                    <span className="text-xs font-mono text-slate-400">
+                      ({item.count} occurrences)
+                    </span>
                   </div>
                   <p className="text-xs text-slate-300 font-mono bg-slate-900 p-2.5 rounded border border-slate-800">
                     💡 <strong>Advisor Mitigation:</strong> {item.advice}
