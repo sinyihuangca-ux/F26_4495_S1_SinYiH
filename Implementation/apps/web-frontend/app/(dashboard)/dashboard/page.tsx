@@ -10,6 +10,7 @@ import {
   Server,
 } from "lucide-react";
 
+// Define the data structure for AI-ranked security threats and advisories
 interface RankedAttack {
   attack_type: string;
   severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
@@ -18,24 +19,27 @@ interface RankedAttack {
 }
 
 export default function DashboardPage() {
+  // Connection and live telemetry state
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
   const [rawThreatCounts, setRawThreatCounts] = useState<
     Record<string, number>
   >({});
 
-  // IP and API Key configuration state
+  // Backend server IP and API configuration state
   const [serverIp, setServerIp] = useState<string>("localhost:8000");
   const [tempIpInput, setTempIpInput] = useState<string>("");
   const [showIpInput, setShowIpInput] = useState(false);
 
+  // Gemini API key state for threat intelligence briefings
   const [apiKey, setApiKey] = useState<string>("");
   const [tempKeyInput, setTempKeyInput] = useState<string>("");
   const [showKeyInput, setShowKeyInput] = useState(false);
 
+  // AI analysis results and loading states
   const [rankedAttacks, setRankedAttacks] = useState<RankedAttack[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Initialize saved configurations & WebSocket connection
+  // Initialize saved configurations (Server IP & Gemini API Key) from localStorage on mount
   useEffect(() => {
     const savedIp =
       localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
@@ -49,11 +53,11 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Connect to WebSocket whenever serverIp changes
+  // Establish and manage WebSocket connection to the backend whenever serverIp changes
   useEffect(() => {
     if (!serverIp) return;
 
-    // Clean IP string (remove protocol if included by accident)
+    // Clean IP string (remove protocol prefixes if included by accident)
     const formattedHost = serverIp
       .replace(/^https?:\/\//, "")
       .replace(/^ws:\/\//, "")
@@ -63,15 +67,19 @@ export default function DashboardPage() {
     console.log(`[+] Attempting WebSocket connection to: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
 
+    // Handle successful WebSocket connection
     ws.onopen = () => {
       setConnectionStatus(`Connected (${formattedHost})`);
       console.log("[+] Connected to Security WebSocket stream");
     };
 
+    // Handle incoming real-time security attack alerts
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "ATTACK_DETECTED") {
         const type = data.label || "Unknown Threat";
+        
+        // Update live threat counters
         setRawThreatCounts((prev) => ({
           ...prev,
           [type]: (prev[type] || 0) + 1,
@@ -95,16 +103,19 @@ export default function DashboardPage() {
       }
     };
 
+    // Handle WebSocket closure or disconnection
     ws.onclose = () => {
       setConnectionStatus("Disconnected");
       console.log("[-] Disconnected from WebSocket stream");
     };
 
+    // Cleanup WebSocket connection on unmount or IP change
     return () => {
       ws.close();
     };
   }, [serverIp]);
 
+  // Save backend server IP configuration to state and localStorage
   const saveServerIp = (ip: string) => {
     const trimmed = ip.trim();
     if (!trimmed) return;
@@ -113,6 +124,7 @@ export default function DashboardPage() {
     setShowIpInput(false);
   };
 
+  // Save Gemini API key configuration to state and localStorage
   const saveApiKey = (key: string) => {
     const trimmed = key.trim();
     if (!trimmed) return;
@@ -121,6 +133,7 @@ export default function DashboardPage() {
     setShowKeyInput(false);
   };
 
+  // Trigger Gemini AI advisor analysis to rank and evaluate active threats
   const runAiAdvisorAnalysis = async () => {
     const activeKey = apiKey || localStorage.getItem("GEMINI_API_KEY");
     if (!activeKey) {
@@ -130,6 +143,7 @@ export default function DashboardPage() {
 
     setIsAnalyzing(true);
     try {
+      // Construct structured prompt instructing Gemini to return a JSON severity briefing
       const prompt = `You are a Senior Cybersecurity AI Advisor. Analyze these active network threats captured in real time: ${JSON.stringify(rawThreatCounts)}. 
       Return ONLY a raw valid JSON array (no markdown code blocks, no backticks) sorted strictly by severity (CRITICAL first, then HIGH, MEDIUM, LOW) in this exact structure:
       [
@@ -165,6 +179,7 @@ export default function DashboardPage() {
         return;
       }
 
+      // Parse text response from Gemini and extract JSON data
       const textResponse = data.candidates[0].content.parts[0].text;
       const cleanedJson = textResponse.replace(/```json|```/g, "").trim();
       const parsed: RankedAttack[] = JSON.parse(cleanedJson);
@@ -180,6 +195,7 @@ export default function DashboardPage() {
     }
   };
 
+  // Utility to determine badge styling based on threat severity level
   const getSeverityBadge = (severity: string) => {
     switch (severity) {
       case "CRITICAL":
@@ -193,6 +209,7 @@ export default function DashboardPage() {
     }
   };
 
+  // Calculate total number of threat events captured
   const totalThreats = Object.values(rawThreatCounts).reduce(
     (a, b) => a + b,
     0,
@@ -200,7 +217,7 @@ export default function DashboardPage() {
 
   return (
     <div className="p-8 space-y-8 bg-slate-950 min-h-screen text-slate-100">
-      {/* Header & Control Bar */}
+      {/* Header & Control Bar Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-800 pb-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
@@ -211,7 +228,7 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="mt-4 sm:mt-0 flex items-center gap-3">
-          {/* Server IP Config Button */}
+          {/* Server IP Configuration Button */}
           <button
             onClick={() => {
               setShowIpInput(!showIpInput);
@@ -222,7 +239,7 @@ export default function DashboardPage() {
             <Server size={14} className="text-sky-400" /> Server IP: {serverIp}
           </button>
 
-          {/* Gemini API Key Button */}
+          {/* Gemini API Key Configuration Button */}
           <button
             onClick={() => {
               setShowKeyInput(!showKeyInput);
@@ -238,6 +255,7 @@ export default function DashboardPage() {
             {apiKey ? "Gemini Key Active" : "Add Gemini Key"}
           </button>
 
+          {/* Trigger AI Analysis Button */}
           <button
             onClick={runAiAdvisorAnalysis}
             disabled={isAnalyzing || totalThreats === 0}
@@ -247,6 +265,7 @@ export default function DashboardPage() {
             {isAnalyzing ? "Analyzing..." : "Analyze Priority"}
           </button>
 
+          {/* WebSocket Connection Status Indicator */}
           <span className="text-xs font-mono px-3 py-1 bg-slate-900 border border-slate-800 rounded-full flex items-center gap-2">
             <span
               className={`h-2 w-2 rounded-full ${connectionStatus.includes("Connected") ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`}
@@ -256,7 +275,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Input Drawer for Server IP */}
+      {/* Input Drawer for Server IP Configuration */}
       {showIpInput && (
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex gap-3 items-center">
           <label className="text-xs text-slate-400 font-mono whitespace-nowrap">
@@ -278,7 +297,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Input Drawer for Gemini API Key */}
+      {/* Input Drawer for Gemini API Key Configuration */}
       {showKeyInput && (
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex gap-3 items-center">
           <input
@@ -297,7 +316,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* AI Security Advisor Advisory List */}
+      {/* AI Security Advisor Ranked Threat Briefing Section */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-xl backdrop-blur-sm">
         <div className="flex justify-between items-center mb-6">
           <div>
