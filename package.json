@@ -4,6 +4,7 @@
     "@clerk/themes": "^2.4.57",
     "clsx": "^2.1.1",
     "lucide-react": "^1.59.0",
+    "pip": "^0.0.1",
     "tailwind-merge": "^3.7.0"
   }
 }
