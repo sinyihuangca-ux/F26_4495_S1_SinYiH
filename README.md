@@ -1,3 +1,4 @@
+
 🛡️ AI-Powered Threat Detection & Mitigation Platform
 An end-to-end, cross-PC cybersecurity monitoring and threat response platform that ingests live network logs, performs unsupervised machine learning anomaly detection via an Isolation Forest model, and streams real-time alerts to a secure Next.js & React Dashboard.
 
@@ -35,6 +36,9 @@ On your simulator node or a separate machine on the network:
 PowerShell
 python attack_simulator.py
 Select an attack scenario (e.g., DDoS, PortScan, or Web Attacks) from the interactive menu to stream logs to FastAPI and watch alerts instantly light up your dashboard!
+
+Video:
+https://collegedouglas-my.sharepoint.com/:f:/r/personal/huangs36_student_douglascollege_ca/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fhuangs36%5Fstudent%5Fdouglascollege%5Fca%2FDocuments%2FCSIS%204495%20Applied%20Research%20Project%2FMidCourseProgress%20Video&share=cgqlpxrQD40%2DR4JV%2D3YSZd4mEgUCPofkm4yp868NyOVVEzpGVw
 
 🧠 Architecture & Component Breakdown
 1. Layer 3 Threat Detection Engine (Backend)
