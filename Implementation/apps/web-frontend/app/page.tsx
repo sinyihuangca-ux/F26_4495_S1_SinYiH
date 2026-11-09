@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Key, ShieldAlert, Sparkles, CheckCircle2, Server, FileText, Download, Trash2, Search, Shield } from "lucide-react";
-import { callAIWithFallback } from "@/utils/aiClient";
+import { Bot, Key, ShieldAlert, Sparkles, Server, FileText, Download, Trash2, Search, Shield } from "lucide-react";
 
 interface LogEntry {
   id: string;
@@ -20,31 +19,25 @@ interface RankedAttack {
 }
 
 export default function UnifiedCommandCenter() {
-  // Connection & Logs state
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
   const [serverIp, setServerIp] = useState<string>("localhost:8000");
-  const [tempIpInput, setTempIpInput] = useState<string>("");
   const [showIpInput, setShowIpInput] = useState(false);
   
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [rawThreatCounts, setRawThreatCounts] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
 
-  // Multi-API Key state
   const [showKeyConfig, setShowKeyConfig] = useState(false);
   const [geminiKey, setGeminiKey] = useState("");
   const [claudeKey, setClaudeKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
 
-  // AI Advisor state
   const [rankedAttacks, setRankedAttacks] = useState<RankedAttack[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Load configuration and saved logs on mount
   useEffect(() => {
     const savedIp = localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
     setServerIp(savedIp);
-    setTempIpInput(savedIp);
 
     setGeminiKey(localStorage.getItem("GEMINI_API_KEY") || "");
     setClaudeKey(localStorage.getItem("CLAUDE_API_KEY") || "");
@@ -53,7 +46,6 @@ export default function UnifiedCommandCenter() {
     const savedLogs = JSON.parse(localStorage.getItem("SECURITY_LOG_HISTORY") || "[]");
     setLogs(savedLogs);
 
-    // Rebuild initial threat counts from history
     const counts: Record<string, number> = {};
     savedLogs.forEach((log: LogEntry) => {
       counts[log.label] = (counts[log.label] || 0) + 1;
@@ -61,7 +53,6 @@ export default function UnifiedCommandCenter() {
     setRawThreatCounts(counts);
   }, []);
 
-  // Manage WebSocket connection
   useEffect(() => {
     if (!serverIp) return;
     const formattedHost = serverIp.replace(/^https?:\/\//, "").replace(/^ws:\/\//, "").trim();
@@ -77,7 +68,7 @@ export default function UnifiedCommandCenter() {
         const type = data.label || "Unknown Threat";
         const newLog: LogEntry = {
           id: Math.random().toString(36).substring(2, 9),
-          timestamp: data.timestamp || new Date().toLocaleString(),
+          timestamp: new Date().toLocaleTimeString(),
           label: type,
           destination_port: data.destination_port ?? 80,
           score: data.score ?? 0,
@@ -108,9 +99,9 @@ export default function UnifiedCommandCenter() {
 
   const runAiAdvisorAnalysis = async () => {
     const keys = [
-      { provider: "gemini" as const, key: geminiKey },
-      { provider: "claude" as const, key: claudeKey },
-      { provider: "openai" as const, key: openaiKey },
+      { provider: "gemini", key: geminiKey },
+      { provider: "claude", key: claudeKey },
+      { provider: "openai", key: openaiKey },
     ].filter((k) => k.key.trim() !== "");
 
     if (keys.length === 0) {
@@ -120,24 +111,27 @@ export default function UnifiedCommandCenter() {
 
     setIsAnalyzing(true);
     try {
-      const prompt = `You are a Senior Cybersecurity AI Advisor. Analyze these active network threats captured in real time: ${JSON.stringify(rawThreatCounts)}. 
-      Return ONLY a raw valid JSON array (no markdown code blocks, no backticks) sorted strictly by severity (CRITICAL first, then HIGH, MEDIUM, LOW) in this exact structure:
-      [
-        {
-          "attack_type": "DDoS",
-          "severity": "CRITICAL",
-          "count": 15,
-          "advice": "Apply rate-limiting rules at firewall and enable cloud scrubbing."
-        }
-      ]`;
+      const formattedHost = serverIp.replace(/^https?:\/\//, "").trim();
+      const res = await fetch(`http://${formattedHost}/api/analyze-threats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threat_counts: rawThreatCounts,
+          keys: keys,
+        }),
+      });
 
-      const rawResponse = await callAIWithFallback(prompt, keys);
-      const cleanedJson = rawResponse.replace(/```json|```/g, "").trim();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to analyze threats");
+
+      console.log(`[+] Successfully analyzed using provider: ${data.provider_used}`);
+
+      const cleanedJson = data.result.replace(/```json|```/g, "").trim();
       const parsed: RankedAttack[] = JSON.parse(cleanedJson);
       setRankedAttacks(parsed);
     } catch (err: any) {
-      console.error("AI Analysis failed across all providers:", err);
-      alert(`AI Analysis Failed: ${err.message}`);
+      console.error("AI Analysis failed:", err);
+      alert(`Failover Simulation Error: ${err.message}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -174,7 +168,6 @@ export default function UnifiedCommandCenter() {
 
   return (
     <div className="p-8 space-y-8 bg-slate-950 min-h-screen text-slate-100">
-      {/* Top Header & Global Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between border-b border-slate-800 pb-4 gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
@@ -214,7 +207,6 @@ export default function UnifiedCommandCenter() {
         </div>
       </div>
 
-      {/* Config Drawer for Server IP */}
       {showIpInput && (
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex gap-3 items-center">
           <label className="text-xs text-slate-400 font-mono whitespace-nowrap">FastAPI Host:</label>
@@ -230,14 +222,13 @@ export default function UnifiedCommandCenter() {
         </div>
       )}
 
-      {/* Config Drawer for Multiple AI Keys */}
       {showKeyConfig && (
         <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-sm text-white flex items-center gap-2">
               <Key size={16} className="text-purple-400" /> Configure Multi-Model Failover Keys
             </h3>
-            <span className="text-xs text-slate-400">The app will automatically cycle through available keys if one fails.</span>
+            <span className="text-xs text-slate-400">Cycles automatically on errors, invalid keys, or high-demand limits (429/503).</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
@@ -279,10 +270,7 @@ export default function UnifiedCommandCenter() {
         </div>
       )}
 
-      {/* Main Single-Page Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left Column: AI Threat Advisor Briefing (Spans 2 cols) */}
         <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-xl backdrop-blur-sm space-y-6">
           <div className="flex justify-between items-center">
             <div>
@@ -322,7 +310,6 @@ export default function UnifiedCommandCenter() {
           </div>
         </div>
 
-        {/* Right Column: Quick Stats / Live Threat Summary */}
         <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-xl backdrop-blur-sm space-y-4">
           <h3 className="text-base font-bold flex items-center gap-2">
             <ShieldAlert className="text-sky-400" /> Live Threat Distribution
@@ -340,10 +327,8 @@ export default function UnifiedCommandCenter() {
             )}
           </div>
         </div>
-
       </div>
 
-      {/* Bottom Section: Unified Persistent Audit Logs Table */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -370,7 +355,6 @@ export default function UnifiedCommandCenter() {
           </div>
         </div>
 
-        {/* Search filter */}
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-3 text-slate-500" size={16} />
           <input
@@ -382,7 +366,6 @@ export default function UnifiedCommandCenter() {
           />
         </div>
 
-        {/* Table */}
         <div className="overflow-hidden rounded-xl border border-slate-800">
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="bg-slate-800/50 text-slate-400 uppercase text-xs font-mono">

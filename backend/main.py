@@ -8,7 +8,7 @@ from typing import List, Dict
 
 app = FastAPI()
 
-# Enable CORS so your Next.js frontend can talk to it
+# Enable CORS for Next.js frontend communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,7 +27,6 @@ async def websocket_alerts(websocket: WebSocket):
     
     try:
         while True:
-            # Simulate a live incoming threat every 3 seconds
             await asyncio.sleep(3)
             attack = {
                 "type": "ATTACK_DETECTED",
@@ -41,7 +40,7 @@ async def websocket_alerts(websocket: WebSocket):
         print("[-] Frontend client disconnected from WebSocket stream")
 
 
-# --- 2. Multi-Model AI Failover Endpoint ---
+# --- 2. Multi-Model AI Failover Endpoint (Handles Errors, Invalid Keys & High Demand 429/503) ---
 class AIKey(BaseModel):
     provider: str  # "gemini", "claude", "openai"
     key: str
@@ -77,7 +76,7 @@ async def analyze_threats_with_failover(req: AnalysisRequest):
         try:
             print(f"[+] Attempting AI analysis with provider: {provider}")
 
-            # 1. Gemini Failover
+            # 1. Gemini
             if provider == "gemini":
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={key}"
                 async with httpx.AsyncClient(timeout=10.0) as client:
@@ -88,13 +87,16 @@ async def analyze_threats_with_failover(req: AnalysisRequest):
                             "generationConfig": {"temperature": 0.2},
                         },
                     )
+                    if res.status_code in [429, 503]:
+                        raise Exception(f"Provider overloaded / High demand (HTTP {res.status_code})")
+                    
                     data = res.json()
                     if "error" in data:
                         raise Exception(data["error"]["message"])
                     text = data["candidates"][0]["content"]["parts"][0]["text"]
                     return {"provider_used": "gemini", "result": text}
 
-            # 2. Claude (Anthropic) Failover
+            # 2. Claude (Anthropic)
             elif provider == "claude":
                 url = "https://api.anthropic.com/v1/messages"
                 async with httpx.AsyncClient(timeout=10.0) as client:
@@ -111,13 +113,16 @@ async def analyze_threats_with_failover(req: AnalysisRequest):
                             "messages": [{"role": "user", "content": prompt}],
                         },
                     )
+                    if res.status_code in [429, 503]:
+                        raise Exception(f"Provider overloaded / High demand (HTTP {res.status_code})")
+
                     data = res.json()
                     if "error" in data:
                         raise Exception(data["error"]["message"])
                     text = data["content"][0]["text"]
                     return {"provider_used": "claude", "result": text}
 
-            # 3. OpenAI / Codex Failover
+            # 3. OpenAI / Codex
             elif provider == "openai":
                 url = "https://api.openai.com/v1/chat/completions"
                 async with httpx.AsyncClient(timeout=10.0) as client:
@@ -133,6 +138,9 @@ async def analyze_threats_with_failover(req: AnalysisRequest):
                             "temperature": 0.2,
                         },
                     )
+                    if res.status_code in [429, 503]:
+                        raise Exception(f"Provider overloaded / High demand (HTTP {res.status_code})")
+
                     data = res.json()
                     if "error" in data:
                         raise Exception(data["error"]["message"])
@@ -140,8 +148,8 @@ async def analyze_threats_with_failover(req: AnalysisRequest):
                     return {"provider_used": "openai", "result": text}
 
         except Exception as e:
-            print(f"[-] Provider {provider} failed: {str(e)}. Cycling to next key...")
+            print(f"[-] Provider {provider} failed ({str(e)}). Cycling to next key...")
             last_error = str(e)
             continue
 
-    raise HTTPException(status_code=500, detail=f"All AI providers failed. Last error: {last_error}")
+    raise HTTPException(status_code=500, detail=f"All AI providers failed or are under high demand. Last error: {last_error}")

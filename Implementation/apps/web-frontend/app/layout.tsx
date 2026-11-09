@@ -1,8 +1,8 @@
-import "./globals.css"; // or styles if you have them
+import "./globals.css";
 
 export const metadata = {
   title: "AI Fortress Security Command Center",
-  description: "Real-time AI security command center with multi-model failover and audit logs",
+  description: "Unified real-time security command center with multi-model failover and audit logs",
 };
 
 export default function RootLayout({
