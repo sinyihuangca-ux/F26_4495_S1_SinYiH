@@ -29,18 +29,25 @@ export default function UnifiedCommandCenter() {
 
   const [showKeyConfig, setShowKeyConfig] = useState(false);
   const [geminiKey, setGeminiKey] = useState("");
-  const [claudeKey, setClaudeKey] = useState("");
+  const [groqKey, setGroqKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
 
   const [rankedAttacks, setRankedAttacks] = useState<RankedAttack[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Safe Host Resolver Helper to guarantee valid URLs
+  const getCleanHost = () => {
+    const raw = serverIp || localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
+    const cleaned = raw.replace(/^https?:\/\//, "").replace(/^ws:\/\//, "").trim();
+    return cleaned !== "" ? cleaned : "localhost:8000";
+  };
 
   useEffect(() => {
     const savedIp = localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
     setServerIp(savedIp);
 
     setGeminiKey(localStorage.getItem("GEMINI_API_KEY") || "");
-    setClaudeKey(localStorage.getItem("CLAUDE_API_KEY") || "");
+    setGroqKey(localStorage.getItem("GROQ_API_KEY") || "");
     setOpenaiKey(localStorage.getItem("OPENAI_API_KEY") || "");
 
     const savedLogs = JSON.parse(localStorage.getItem("SECURITY_LOG_HISTORY") || "[]");
@@ -53,45 +60,75 @@ export default function UnifiedCommandCenter() {
     setRawThreatCounts(counts);
   }, []);
 
+  // Robust Auto-Reconnecting WebSocket Effect
   useEffect(() => {
-    if (!serverIp) return;
-    const formattedHost = serverIp.replace(/^https?:\/\//, "").replace(/^ws:\/\//, "").trim();
-    const wsUrl = `ws://${formattedHost}/ws/alerts`;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: NodeJS.Timeout;
+    let isMounted = true;
 
-    const ws = new WebSocket(wsUrl);
+    const connectWebSocket = () => {
+      if (!isMounted) return;
 
-    ws.onopen = () => setConnectionStatus(`Connected (${formattedHost})`);
-    
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "ATTACK_DETECTED") {
-        const type = data.label || "Unknown Threat";
-        const newLog: LogEntry = {
-          id: Math.random().toString(36).substring(2, 9),
-          timestamp: new Date().toLocaleTimeString(),
-          label: type,
-          destination_port: data.destination_port ?? 80,
-          score: data.score ?? 0,
-        };
+      const hostToUse = getCleanHost();
+      const wsUrl = `ws://${hostToUse}/ws/alerts`;
 
-        setRawThreatCounts((prev) => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
-        setLogs((prev) => {
-          const updated = [newLog, ...prev];
-          localStorage.setItem("SECURITY_LOG_HISTORY", JSON.stringify(updated));
-          return updated;
-        });
-      }
+      setConnectionStatus("Connecting...");
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        if (isMounted) setConnectionStatus(`Connected (${hostToUse})`);
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "ATTACK_DETECTED") {
+            const type = data.label || "Unknown Threat";
+            const newLog: LogEntry = {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString(),
+              label: type,
+              destination_port: data.destination_port ?? 80,
+              score: data.score ?? 0,
+            };
+
+            setRawThreatCounts((prev) => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
+            setLogs((prev) => {
+              const updated = [newLog, ...prev];
+              localStorage.setItem("SECURITY_LOG_HISTORY", JSON.stringify(updated));
+              return updated;
+            });
+          }
+        } catch (err) {
+          console.error("Failed to parse incoming WebSocket message:", err);
+        }
+      };
+
+      ws.onerror = (error) => {
+        // Suppress noisy repeating console logs if connection is down
+      };
+
+      ws.onclose = () => {
+        if (isMounted) {
+          setConnectionStatus("Disconnected (Reconnecting...)");
+          reconnectTimer = setTimeout(connectWebSocket, 3000);
+        }
+      };
     };
 
-    ws.onclose = () => setConnectionStatus("Disconnected");
+    connectWebSocket();
 
-    return () => ws.close();
+    return () => {
+      isMounted = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+    };
   }, [serverIp]);
 
   const saveConfig = () => {
     localStorage.setItem("SECURITY_BACKEND_IP", serverIp);
     localStorage.setItem("GEMINI_API_KEY", geminiKey);
-    localStorage.setItem("CLAUDE_API_KEY", claudeKey);
+    localStorage.setItem("GROQ_API_KEY", groqKey);
     localStorage.setItem("OPENAI_API_KEY", openaiKey);
     setShowKeyConfig(false);
     setShowIpInput(false);
@@ -99,8 +136,8 @@ export default function UnifiedCommandCenter() {
 
   const runAiAdvisorAnalysis = async () => {
     const keys = [
+      { provider: "groq", key: groqKey },
       { provider: "gemini", key: geminiKey },
-      { provider: "claude", key: claudeKey },
       { provider: "openai", key: openaiKey },
     ].filter((k) => k.key.trim() !== "");
 
@@ -111,8 +148,8 @@ export default function UnifiedCommandCenter() {
 
     setIsAnalyzing(true);
     try {
-      const formattedHost = serverIp.replace(/^https?:\/\//, "").trim();
-      const res = await fetch(`http://${formattedHost}/api/analyze-threats`, {
+      const hostToUse = getCleanHost();
+      const res = await fetch(`http://${hostToUse}/api/analyze-threats`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -123,8 +160,6 @@ export default function UnifiedCommandCenter() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to analyze threats");
-
-      console.log(`[+] Successfully analyzed using provider: ${data.provider_used}`);
 
       const cleanedJson = data.result.replace(/```json|```/g, "").trim();
       const parsed: RankedAttack[] = JSON.parse(cleanedJson);
@@ -164,7 +199,7 @@ export default function UnifiedCommandCenter() {
   );
 
   const totalThreats = Object.values(rawThreatCounts).reduce((a, b) => a + b, 0);
-  const activeKeysCount = [geminiKey, claudeKey, openaiKey].filter((k) => k.trim() !== "").length;
+  const activeKeysCount = [geminiKey, groqKey, openaiKey].filter((k) => k.trim() !== "").length;
 
   return (
     <div className="p-8 space-y-8 bg-slate-950 min-h-screen text-slate-100">
@@ -228,9 +263,19 @@ export default function UnifiedCommandCenter() {
             <h3 className="font-bold text-sm text-white flex items-center gap-2">
               <Key size={16} className="text-purple-400" /> Configure Multi-Model Failover Keys
             </h3>
-            <span className="text-xs text-slate-400">Cycles automatically on errors, invalid keys, or high-demand limits (429/503).</span>
+            <span className="text-xs text-slate-400">Cycles automatically through Groq (Free Tier), Gemini, and OpenAI.</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Groq API Key (Free Tier)</label>
+              <input
+                type="password"
+                placeholder="gsk_..."
+                value={groqKey}
+                onChange={(e) => setGroqKey(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
+              />
+            </div>
             <div>
               <label className="text-xs text-slate-400 block mb-1">Gemini API Key</label>
               <input
@@ -238,16 +283,6 @@ export default function UnifiedCommandCenter() {
                 placeholder="AIza..."
                 value={geminiKey}
                 onChange={(e) => setGeminiKey(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-400 block mb-1">Claude API Key (Anthropic)</label>
-              <input
-                type="password"
-                placeholder="sk-ant-..."
-                value={claudeKey}
-                onChange={(e) => setClaudeKey(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono"
               />
             </div>

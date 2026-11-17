@@ -1,6 +1,9 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
+from pydantic import BaseModel
+from typing import List, Dict, Any
+import json
+import httpx
 from app.ml_engine import ml_engine
 
 app = FastAPI( 
@@ -42,6 +45,17 @@ class ConnectionManager:
                 print(f"[-] Error broadcasting to client: {e}")
 
 manager = ConnectionManager()
+
+# ==========================================
+# PYDANTIC SCHEMAS FOR AI FAILOVER
+# ==========================================
+class KeyItem(BaseModel):
+    provider: str
+    key: str
+
+class ThreatAnalysisRequest(BaseModel):
+    threat_counts: Dict[str, int]
+    keys: List[KeyItem]
 
 # ==========================================
 # ROUTES
@@ -94,3 +108,95 @@ async def ingest_log_stream(logs: list[dict]):
         "processed": len(logs), 
         "anomalies_flagged": anomalies_detected
     }
+
+@app.post("/api/analyze-threats")
+async def analyze_threats(payload: ThreatAnalysisRequest):
+    """
+    Multi-model AI advisor endpoint with automatic failover across provided API keys.
+    """
+    if not payload.keys:
+        raise HTTPException(status_code=400, detail="No API keys provided for failover analysis.")
+
+    last_error = None
+
+    for item in payload.keys:
+        provider = item.provider.lower()
+        api_key = item.key
+
+        prompt = f"""
+        You are an elite cybersecurity SOC analyst. Analyze the following aggregated network threat counts:
+        {json.dumps(payload.threat_counts, indent=2)}
+
+        Return a valid JSON array containing objects with these exact keys:
+        - "attack_type": string name of the threat
+        - "severity": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
+        - "count": integer occurrences
+        - "advice": actionable technical mitigation recommendation
+
+        Return ONLY raw JSON, without markdown formatting blocks like ```json or ```.
+        """
+
+        try:
+            # 1. Groq Free Tier (Replaces Claude)
+            if provider == "groq":
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": "llama-3.3-70b-versatile",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.2
+                        }
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        text_result = data["choices"][0]["message"]["content"]
+                        return {"provider_used": "Groq (Free Tier)", "result": text_result}
+                    else:
+                        last_error = f"Groq API Error {resp.status_code}: {resp.text}"
+
+            # 2. Gemini
+            elif provider == "gemini":
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+                        json={"contents": [{"parts": [{"text": prompt}]}]}
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        text_result = data["candidates"][0]["content"]["parts"][0]["text"]
+                        return {"provider_used": "Gemini", "result": text_result}
+                    else:
+                        last_error = f"Gemini API Error {resp.status_code}: {resp.text}"
+
+            # 3. OpenAI
+            elif provider == "openai":
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": "gpt-4o-mini",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.2
+                        }
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        text_result = data["choices"][0]["message"]["content"]
+                        return {"provider_used": "OpenAI", "result": text_result}
+                    else:
+                        last_error = f"OpenAI API Error {resp.status_code}: {resp.text}"
+
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    raise HTTPException(status_code=502, detail=f"All failover AI models failed. Last error: {last_error}")
