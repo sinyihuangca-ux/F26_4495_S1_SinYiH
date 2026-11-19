@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, ShieldAlert, Sparkles } from "lucide-react";
+import { Cpu, RefreshCw, ShieldAlert, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import { useLive } from "@/lib/live";
 
@@ -30,6 +30,11 @@ interface Incident {
     top_sources: string[];
     distinct_dst_ports: number;
     ml_score_median: number | null;
+    ml_score_min: number | null;
+    ml_score_max: number | null;
+    ml_verdicts: Record<string, number>;
+    final_verdicts: Record<string, number>;
+    per_flow_ai: { reviewed: number; verdicts: Record<string, number>; attack_types_named: Record<string, number> };
   };
   brief: Brief | null;
   provider: string | null;
@@ -67,45 +72,58 @@ function List({ title, items, ordered = false }: { title: string; items: string[
   );
 }
 
-function IncidentCard({ inc, rank, onRefresh, busy }: {
-  inc: Incident;
-  rank: number;
-  onRefresh: () => void;
-  busy: boolean;
-}) {
-  const b = inc.brief;
-  const s = inc.stats;
-  const meta = [
-    `${inc.flow_count} flows`,
-    s.flows_per_s ? `${s.flows_per_s}/s` : null,
-    inc.kind === "scan" ? `${s.distinct_dst_ports} ports` : `from ${s.top_sources.slice(0, 2).join(", ")}${s.distinct_sources > 2 ? ` +${s.distinct_sources - 2}` : ""}`,
-    s.ml_score_median != null ? `ML score ~${s.ml_score_median.toFixed(2)}` : null,
-  ].filter(Boolean).join(" · ");
-
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <li className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            {b && (
-              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${SEVERITY[b.severity]}`}>
-                #{rank} {b.severity}
-              </span>
-            )}
-            <span className="font-semibold text-white">{b ? b.assessment : inc.title}</span>
-            {b && <span className="text-[11px] text-slate-400">{Math.round(b.confidence * 100)}% confident</span>}
-          </div>
-          <p className="mt-1 font-mono text-[11px] text-slate-500">{inc.title} · {meta}</p>
-        </div>
-        <button onClick={onRefresh} disabled={busy} title="Re-analyse this incident"
-          className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300 disabled:opacity-40">
-          <RefreshCw size={13} className={busy ? "animate-spin" : ""} />
-        </button>
-      </div>
+    <div className="flex justify-between gap-3 text-xs">
+      <span className="text-slate-500">{label}</span>
+      <span className="text-right font-mono text-slate-200">{value}</span>
+    </div>
+  );
+}
 
+// Left column: what the ML engine measured and flagged for this incident.
+function MlColumn({ inc }: { inc: Incident }) {
+  const s = inc.stats;
+  const v = s.ml_verdicts ?? {};
+  const named = Object.entries(s.per_flow_ai?.attack_types_named ?? {}).sort((a, b) => b[1] - a[1]);
+  const range = s.ml_score_min != null && s.ml_score_max != null
+    ? `${s.ml_score_min.toFixed(2)}–${s.ml_score_max.toFixed(2)}` : "—";
+  return (
+    <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/10 p-3">
+      <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
+        <Cpu size={13} /> ML detected
+      </p>
+      <div className="space-y-1">
+        <Stat label="Flagged flows" value={inc.flow_count} />
+        <Stat label="Malicious / suspicious" value={(v.malicious ?? 0) + (v.suspicious ?? 0) > 0
+          ? `${v.malicious ?? 0} / ${v.suspicious ?? 0}` : "none (flagged by per-flow AI)"} />
+        <Stat label="Score (median, range)" value={`${s.ml_score_median?.toFixed(2) ?? "—"} (${range})`} />
+        <Stat label="Rate" value={s.flows_per_s ? `${s.flows_per_s} flows/s over ${Math.round(s.time_span_s)}s` : "single burst"} />
+        <Stat label={inc.kind === "scan" ? "Ports touched" : "Sources"}
+          value={inc.kind === "scan" ? s.distinct_dst_ports : `${s.distinct_sources} (${s.top_sources.slice(0, 2).join(", ")})`} />
+        {s.per_flow_ai?.reviewed > 0 && (
+          <Stat label="Per-flow AI checks" value={`${s.per_flow_ai.reviewed}${named.length ? ` · ${named[0][0]}` : ""}`} />
+        )}
+      </div>
+      <p className="mt-2 text-[10px] text-slate-500">Scores: 0.90 = more unusual than 90% of normal traffic.</p>
+    </div>
+  );
+}
+
+// Right column: the AI advisor's assessment of the same incident.
+function AiColumn({ inc }: { inc: Incident }) {
+  const b = inc.brief;
+  return (
+    <div className="rounded-lg border border-purple-900/50 bg-purple-950/10 p-3">
+      <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-purple-300">
+        <Sparkles size={13} /> AI assessment
+      </p>
       {b ? (
         <>
-          <p className="mt-2 text-xs text-slate-200">{b.summary}</p>
+          <p className="text-sm font-semibold text-white">
+            {b.assessment} <span className="text-[11px] font-normal text-slate-400">· {Math.round(b.confidence * 100)}% confident</span>
+          </p>
+          <p className="mt-1 text-xs text-slate-200">{b.summary}</p>
           <List title="Why I think so" items={b.evidence} />
           <List title="What to do" items={b.actions} ordered />
           <List title="To confirm" items={b.verify} />
@@ -116,8 +134,40 @@ function IncidentCard({ inc, rank, onRefresh, busy }: {
           </p>
         </>
       ) : (
-        <p className="mt-2 text-xs text-slate-500">Not analysed yet.</p>
+        <p className="text-xs text-slate-500">Not analysed yet. Click “Analyse priority”.</p>
       )}
+    </div>
+  );
+}
+
+function IncidentCard({ inc, rank, onRefresh, busy }: {
+  inc: Incident;
+  rank: number;
+  onRefresh: () => void;
+  busy: boolean;
+}) {
+  const b = inc.brief;
+  return (
+    <li className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {b && (
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${SEVERITY[b.severity]}`}>
+              #{rank} {b.severity}
+            </span>
+          )}
+          <span className="font-semibold text-white">{inc.title}</span>
+          <span className="font-mono text-[11px] text-slate-500">{inc.flow_count} flows</span>
+        </div>
+        <button onClick={onRefresh} disabled={busy} title="Re-analyse this incident"
+          className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300 disabled:opacity-40">
+          <RefreshCw size={13} className={busy ? "animate-spin" : ""} />
+        </button>
+      </div>
+      <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <MlColumn inc={inc} />
+        <AiColumn inc={inc} />
+      </div>
     </li>
   );
 }
@@ -170,7 +220,7 @@ export function ThreatBriefing() {
         <div>
           <h3 className="font-semibold text-white">AI threat advisor</h3>
           <p className="text-[11px] text-slate-500">
-            {incidents.length ? `${incidents.length} incidents · ${pending} to analyse` : "What each incident probably is, and what to do"}
+            {incidents.length ? `${incidents.length} incidents · ${pending} to analyse · ML findings next to the AI assessment` : "What each incident probably is, and what to do"}
           </p>
         </div>
         <button onClick={() => run()} disabled={loading !== null || incidents.length === 0}

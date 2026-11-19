@@ -364,7 +364,9 @@ def incident_view(inc: dict, cached: Optional[dict], fresh: bool) -> dict:
         "flow_count": inc["flow_count"], "first_seen": inc["first_seen"], "last_seen": inc["last_seen"],
         "stats": {k: ev[k] for k in ("flows_per_s", "time_span_s", "distinct_sources", "top_sources",
                                       "top_targets", "distinct_dst_ports")}
-                 | {"ml_score_median": ev["ml"]["score_median"], "final_verdicts": ev["final_verdicts"]},
+                 | {"ml_score_median": ev["ml"]["score_median"], "ml_score_min": ev["ml"]["score_min"],
+                    "ml_score_max": ev["ml"]["score_max"], "ml_verdicts": ev["ml"]["verdicts"],
+                    "final_verdicts": ev["final_verdicts"], "per_flow_ai": ev["per_flow_ai"]},
         "brief": cached["brief"] if cached else None,
         "provider": cached["provider"] if cached else None,
         "briefed_at": cached["created_at"] if cached else None,

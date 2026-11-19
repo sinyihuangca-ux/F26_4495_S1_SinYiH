@@ -23,7 +23,7 @@ export default function ThreatsPage() {
         <p className="text-sm text-slate-400">What was detected, and what still needs a human decision.</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <h3 className="mb-3 font-semibold text-white">Active threat types</h3>
           {types.length === 0 ? (
@@ -40,8 +40,9 @@ export default function ThreatsPage() {
           )}
         </div>
         <AccuracyPanel />
-        <ThreatBriefing />
       </div>
+
+      <ThreatBriefing />
 
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
         <h3 className="font-semibold text-white">Needs review ({review.length})</h3>

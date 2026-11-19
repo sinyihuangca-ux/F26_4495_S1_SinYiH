@@ -22,8 +22,7 @@ export default function DashboardPage() {
       <KpiCards />
       <DashboardCharts />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 xl:col-span-2">
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-semibold text-white">Live alerts · ML vs AI</h3>
             <Link href="/logs" className="text-xs text-sky-400 hover:underline">
@@ -31,9 +30,9 @@ export default function DashboardPage() {
             </Link>
           </div>
           <FlowTable flows={alerts.slice(0, 15)} showTruth={false} />
-        </div>
-        <ThreatBriefing />
       </div>
+
+      <ThreatBriefing />
     </div>
   );
 }

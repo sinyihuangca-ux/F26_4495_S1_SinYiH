@@ -23,6 +23,17 @@
   button to force a re-read. New endpoint `GET /api/incidents` shows saved briefings
   without calling the AI.
 
+- **ML and AI side by side in each incident card** (ported from Sin-Yi's split
+  "ML Detected Results / AI Detection Results" briefing in her `app/page.tsx`, commit
+  8345a36/90c8ace). Left column: what the ML engine flagged (verdict counts, score
+  median and range, rate, sources or ports). Right column: the AI assessment. The
+  advisor now spans the full page width on Dashboard and Threats so both columns fit;
+  they stack on narrow screens.
+- Merged with Sin-Yi's 2026-11-19 commits: her `app/page.tsx` (settings drawer + split
+  briefing) and the `/api/analyze-threats` endpoint she added to `initial-app/` are
+  superseded by the Settings page, the incident advisor above and the main backend.
+  Her NotificationBell fix (stray `>`) was already in the rebuilt component.
+
 ### Per-flow AI review
 - Each flow is now sent with its context from the last 10 minutes: flows to the same
   IP+port, distinct sources, time span, and ports/hosts touched by the same source. A

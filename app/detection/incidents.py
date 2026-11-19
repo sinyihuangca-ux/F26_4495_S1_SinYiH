@@ -72,8 +72,8 @@ def group(flows: list[dict]) -> dict[str, list[dict]]:
     return groups
 
 
-def _median(values: list[float]) -> Optional[float]:
-    return round(statistics.median(values), 1) if values else None
+def _median(values: list[float], digits: int = 1) -> Optional[float]:
+    return round(statistics.median(values), digits) if values else None
 
 
 def _top(counter: Counter, n: int = 3) -> list:
@@ -120,7 +120,7 @@ def summarise(key: str, flows: list[dict]) -> dict:
         "ml": {
             "verdicts": dict(Counter(f.get("ml_verdict") for f in flows)),
             "score_min": round(min(ml_scores), 2) if ml_scores else None,
-            "score_median": _median(ml_scores),
+            "score_median": _median(ml_scores, 2),
             "score_max": round(max(ml_scores), 2) if ml_scores else None,
         },
         "per_flow_ai": {
