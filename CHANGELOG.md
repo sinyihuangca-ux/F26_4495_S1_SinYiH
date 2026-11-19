@@ -6,6 +6,8 @@
   window. It handles first-run setup (venv, pip and npm installs, model training, `.env`
   files) and skips any step that's already done. `-Simulate` also starts the attack
   simulator against this PC, and `-NoBrowser` skips opening the dashboard.
+- `next.config.ts`: `turbopack.root` is now an absolute path, which removes the
+  "turbopack.root should be absolute" warning.
 
 ## 2.0.0 - 2026-11-19 (branch `rebuild`)
 

@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -8,7 +9,7 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
-    root: ".", 
+    root: path.resolve("."), // must be absolute
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],
