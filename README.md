@@ -17,11 +17,41 @@ https://collegedouglas-my.sharepoint.com/:f:/r/personal/huangs36_student_douglas
 
 ### One command (Windows)
 
-From the project root (`F26_4495_S1_SinYiH`):
+Run it from the project root (`F26_4495_S1_SinYiH`), not from inside
+`Implementation\apps\web-frontend`. Pick **one** of these setups; don't run both
+commands, or a second backend and dashboard will fight over the same ports.
+
+**One PC (testing on your own machine):**
 
 ```powershell
-.\start.ps1              # backend + dashboard, opens the browser
-.\start.ps1 -Simulate    # also starts the attack simulator against this PC
+.\start.ps1 -Simulate
+```
+
+This opens three windows: backend, dashboard and attack simulator (aimed at
+`localhost`). `-Simulate` does everything plain `.\start.ps1` does, plus the simulator.
+
+**Two PCs (a second machine plays the attacker):**
+
+On the main PC:
+
+```powershell
+.\start.ps1
+ipconfig                 # note this PC's IPv4 address, e.g. 192.168.1.50
+```
+
+On the attacker PC (copy the `data` folder over first):
+
+```powershell
+pip install pandas requests
+cd data
+python attack_simulator.py --server 192.168.1.50:8000
+```
+
+If the attacker PC can't connect, allow port 8000 through Windows Firewall on the
+main PC (admin PowerShell, once):
+
+```powershell
+New-NetFirewallRule -DisplayName "Threat platform 8000" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow
 ```
 
 The first run creates `.venv`, installs the Python and npm packages, trains the model

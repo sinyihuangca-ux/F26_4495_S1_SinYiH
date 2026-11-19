@@ -8,6 +8,8 @@
   simulator against this PC, and `-NoBrowser` skips opening the dashboard.
 - `next.config.ts`: `turbopack.root` is now an absolute path, which removes the
   "turbopack.root should be absolute" warning.
+- README: explains the one-PC (`.\start.ps1 -Simulate`) and two-PC (`.\start.ps1` +
+  simulator on the other machine) setups, and the firewall rule for port 8000.
 
 ## 2.0.0 - 2026-11-19 (branch `rebuild`)
 
