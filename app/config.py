@@ -1,0 +1,68 @@
+"""Paths, environment loading and default settings.
+
+Secrets (AI provider keys, ntfy topic) live in the project-root .env file.
+Everything else the dashboard can change is stored in SQLite (see store.py).
+"""
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+APP_DIR = ROOT_DIR / "app"
+DATA_DIR = ROOT_DIR / "data"
+MODEL_DIR = APP_DIR / "models"
+MODEL_PATH = MODEL_DIR / "ml_bundle.joblib"
+ENV_PATH = Path(os.getenv("THREAT_ENV_FILE", ROOT_DIR / ".env"))
+DB_PATH = Path(os.getenv("THREAT_DB_PATH", ROOT_DIR / "threats.db"))
+
+load_dotenv(ENV_PATH)
+
+# Secrets the dashboard is allowed to write. Values are never sent back unmasked.
+SECRET_KEYS = {
+    "gemini": "GEMINI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "claude": "ANTHROPIC_API_KEY",
+    "ntfy_topic": "NTFY_TOPIC",
+}
+
+PROVIDERS = ["gemini", "groq", "openai", "claude"]
+
+# Non-secret settings and their defaults. Types here are used to validate updates.
+DEFAULT_SETTINGS: dict = {
+    "ml_enabled": True,
+    "ai_enabled": True,
+    # ML score (0-1) at or above which a flow is "suspicious" / "malicious".
+    "ml_suspicious_threshold": 0.85,
+    "ml_malicious_threshold": 0.95,
+    # Share of ML-benign flows the AI also checks, so it can catch what ML misses.
+    "ai_sample_rate": 0.10,
+    # AI verdicts below this confidence are treated as "suspicious" rather than trusted.
+    "ai_min_confidence": 0.60,
+    # Seconds to wait between AI calls (keeps free tiers from rate-limiting).
+    "ai_min_interval": 2.0,
+    "ai_batch_size": 10,
+    "provider_order": list(PROVIDERS),
+    "models": {
+        "gemini": "gemini-2.5-flash",
+        "groq": "llama-3.3-70b-versatile",
+        "openai": "gpt-4o-mini",
+        "claude": "claude-haiku-4-5",
+    },
+    "notify_enabled": True,
+    # Minimum seconds between ntfy pushes; alerts in between are summarised.
+    "notify_cooldown": 30,
+}
+
+# Clerk: set one of these so the backend can verify dashboard users.
+CLERK_JWKS_URL = os.getenv("CLERK_JWKS_URL", "")
+CLERK_PUBLISHABLE_KEY = os.getenv("CLERK_PUBLISHABLE_KEY", "") or os.getenv(
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", ""
+)
+
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    if o.strip()
+]

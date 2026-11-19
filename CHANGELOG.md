@@ -1,0 +1,89 @@
+# Changelog
+
+## 2.0.0 - 2026-11-19 (branch `rebuild`)
+
+A rebuild of the backend, simulator and dashboard. The core flow is unchanged: the
+simulator posts CIC-IDS-2017 records to `/api/logs/ingest`, the backend scores them,
+and the dashboard shows alerts live over `/ws/alerts`. Folder names are unchanged.
+
+### Detection
+- **Removed the label shortcut.** `/api/logs/ingest` used to raise an alert whenever
+  the CSV's `Label` column wasn't BENIGN, so the dashboard showed the dataset's answers
+  rather than the model's. The label is now stored only to score accuracy.
+- **Retrained the ML engine.** The old Isolation Forest used 8 features and, judged
+  without the label shortcut, caught about 6% of attacks. The One-Class SVM was in the
+  code, but its model file was never saved, so it never ran. The new engine is a 5-fold
+  ensemble of both models over 66 log-scaled features, calibrated on held-out normal
+  traffic. On the repo's data it catches 66% of attack flows; 11.5% of held-out normal
+  flows land in "suspicious", which is what the AI review is for. See `python -m app.train`.
+- **Added three verdict levels** (benign / suspicious / malicious) with thresholds
+  you can adjust, instead of a yes/no flag.
+- **Added the AI engine as a second, independent judge.** It reviews ML-flagged flows
+  plus a configurable sample of ML-benign ones, through a rate-limited background
+  queue with Gemini → Groq → OpenAI → Claude failover. Providers that return 429 or
+  reject their key are skipped for a while.
+- **Added combination rules** (`app/detection/verdict.py`), an ML-vs-AI agreement flag,
+  analyst feedback (confirmed / false positive), and an allowlist. False positives
+  feed back into training.
+- Either engine can be switched off from Settings.
+
+### Backend
+- Split `app/main.py` into `detection/`, `store.py`, `auth.py`, `notify.py`, `train.py`.
+- Flows, feedback, allowlist and settings are stored in SQLite (`threats.db`) instead of
+  each browser's localStorage, so history survives a browser change and all pages agree.
+- AI keys are entered on the Settings page, written to the backend `.env`, and only
+  ever returned masked. The dashboard no longer calls Gemini directly from the browser.
+- Endpoints that change settings or data check the Clerk session token. Without Clerk
+  configured they only accept requests from the local machine.
+- ntfy alerts are now async and rate-limited, and the topic comes from Settings or `.env`. Previously
+  every flagged row made a blocking `requests.post`, and the topic was hard-coded.
+- New endpoints: `/api/flows`, `/api/flows/export.csv`, `/api/flows/{id}/feedback`,
+  `/api/stats`, `/api/settings`, `/api/allowlist`, `/api/health`, `/api/rss`.
+  `/api/analyze-threats` now uses the stored threat counts and server-side keys.
+- Fixed: the Gemini model name `gemini-3.8-flash` (doesn't exist) is now `gemini-2.5-flash`
+  and configurable per provider. The WebSocket manager no longer crashes on
+  disconnect. The Dockerfile had a syntax error (`"--port". "8000"`).
+  `requirements.txt` was missing pandas, httpx, requests and joblib.
+- Added backend tests (`python -m pytest -q`, 22 tests).
+
+### Simulator (`data/attack_simulator.py`)
+- The server address is now `--server host:port` or `THREAT_SERVER`, instead of being edited into the file.
+- Added `--scenario`, `--batch`, `--delay` and `--no-shuffle`. Rows are shuffled by default so
+  attack and normal traffic arrive mixed.
+- The "normal traffic" scenario now actually sends only benign rows. It used to resend the DDoS file.
+- Reads the Windows-1252 web-attack CSV correctly, and prints per-batch verdicts.
+
+### Dashboard (`Implementation/apps/web-frontend`)
+- One shared WebSocket connection (`lib/live.tsx`) with auto-reconnect, instead of three
+  separate ones. The notification bell's connection was hard-coded to localhost.
+- Dashboard, Logs, Threats and Settings all show real backend data. Removed the
+  hard-coded demo data in the log feed, KPI cards, charts and RSS route.
+- New pages: **Threats** (what needs review, accuracy, AI briefing) and **Settings**
+  (backend address, engine switches, thresholds, AI keys and provider order, ntfy, allowlist).
+  The sidebar links to both already existed but went nowhere. Removed the "Containers" link.
+- Fixed the route conflict: `app/page.tsx` and `app/(marketing)/page.tsx` both served `/`.
+- Fixed nested `<html>` layouts: `ClerkProvider` now lives in the root layout only.
+- Fixed a syntax error in `NotificationBell.tsx` (a stray `>`).
+- Fixed the font: `--font-sans` referenced itself, so pages rendered in a serif fallback.
+- Logs, Threats and Settings are now login-protected, as well as Dashboard.
+- Upgraded `next` and `eslint-config-next` from 16.4.3 to 16.4.6. `next build` refused to
+  build 16.4.3 because of a known security vulnerability.
+- `next build` passes with no type or lint errors.
+
+### Removed
+- `clerk-nextjs/`: an unused starter app.
+- `backend/main.py`: a second FastAPI app that sent random fake alerts.
+- `Implementation/apps/initial-app/`: an outdated copy of the backend.
+- `app/attacking setup/attack_simulator.py`: a duplicate of `data/attack_simulator.py`.
+- `app/parser.py` and `data/sample_syslog.log`: a syslog parser nothing called.
+- `app/ml_engine.py`, `app/models/isolation_forest*.joblib`: replaced by `app/detection/` and `ml_bundle.joblib`.
+- Root `package.json`, `package-lock.json` and `node_modules`, which nothing used, and `tree.txt` (a 650 KB directory dump).
+- `Implementation/apps/web-frontend/utils/aiClient.ts`, `components/log-feed.tsx`,
+  `components/action-banner.tsx` and `app/api/notifications/rss/`: unused or demo-only.
+
+### Size
+The folder was about 900 MB, almost all of it generated files: `.next` (316 MB),
+three `node_modules` folders, `.venv`, and about 105 MB of git history. The source
+itself is about 9 MB, including the reports. Generated folders are git-ignored and
+rebuilt by `npm install` and `pip install`. Git history was left as is, because shrinking it would
+mean rewriting shared history; about 70 MB of it is old CICFlowMeter and jnetpcap zips.

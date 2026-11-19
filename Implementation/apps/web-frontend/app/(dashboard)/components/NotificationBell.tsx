@@ -1,109 +1,67 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import { Bell, ShieldAlert, X } from "lucide-react";
-
-interface Alert {
-  type: string;
-  label: string;
-  score: number;
-  destination_port: number;
-  timestamp: string;
-}
+import { useLive } from "@/lib/live";
+import { VerdictBadge, timeLabel } from "@/components/verdict";
 
 export default function NotificationBell() {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
+  const { alerts, unread, markRead, status } = useLive();
+  const [open, setOpen] = useState(false);
+  const recent = alerts.filter((a) => a.final_verdict !== "benign").slice(0, 20);
 
-  useEffect(() => {
-    // Connect to FastAPI WebSocket endpoint
-    const ws = new WebSocket("ws://localhost:8000/ws/alerts");
-
-    ws.onopen = () => {
-      setIsConnected(true);
-      console.log("[*] Connected to security WebSocket stream");
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data: Alert = JSON.parse(event.data);
-        if (data.type === "ATTACK_DETECTED") {
-          setAlerts((prev) => [data, ...prev.slice(0, 19)]); // Keep last 20 alerts
-          setIsOpen(true); // Auto-open dropdown on critical alert
-        }
-      } catch (err) {
-        console.error("Failed to parse WebSocket message", err);
-      }
-    };
-
-    ws.onclose = () => {
-      setIsConnected(false);
-      console.log("[-] Disconnected from security WebSocket stream");
-    };
-
-    return () => {
-      ws.close();
-    };
-  }, []);
+  const toggle = () => {
+    setOpen((o) => !o);
+    markRead();
+  };
 
   return (
     <div className="relative">
-      {/* Bell Button with Badge */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-400 hover:text-white transition rounded-full hover:bg-gray-800 focus:outline-none"
-        aria-label="Notifications"
-      >
-        <Bell className="w-6 h-6"/>
-        {alerts.length > 0 && (
-          <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white animate-pulse">
-            {alerts.length}
+      <button onClick={toggle} aria-label="Notifications"
+        className="relative rounded-full p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white">
+        <Bell className="h-6 w-6" />
+        {unread > 0 && (
+          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+            {unread > 99 ? "99+" : unread}
           </span>
         )}
       </button>
 
-      {/* Dropdown Menu */}
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 bg-gray-950 border-b border-gray-800">
-            <div className="flex items-center space-x-2">
-              <ShieldAlert className="w-5 h-5 text-red-500"/>
-              <span className="font-semibold text-white text-sm">Security Threat Alerts</span>
+      {open && (
+        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border border-slate-800 bg-slate-900 shadow-2xl sm:w-96">
+          <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5 text-red-500" />
+              <span className="text-sm font-semibold text-white">Threat alerts</span>
             </div>
-            <div className="flex items-center space-x-2">
-              <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
-              <button
-                onClick={() => setIsOpen(false)}
-                className="text-gray-400 hover:text-white"
-              >
-                <X className="w-4 h-4"/>
-              </button>
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${status === "connected" ? "bg-emerald-500" : "bg-red-500"}`} />
+              <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-white"><X className="h-4 w-4" /></button>
             </div>
           </div>
-
-          <div className="max-h-80 overflow-y-auto divide-y divide-gray-800/50">
-            {alerts.length === 0 ? (
-              <div className="py-8 text-center text-sm text-gray-500">
-                No active threats detected. System secure.
-              </div>
+          <div className="max-h-80 divide-y divide-slate-800/50 overflow-y-auto">
+            {recent.length === 0 ? (
+              <div className="py-8 text-center text-sm text-slate-500">No threats detected.</div>
             ) : (
-              alerts.map((alert, index) => (
-                <div key={index} className="p-4 hover:bg-gray-800/50 transition">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-medium text-red-400 bg-red-500/10 px-2 py-0.5 rounded">
-                      {alert.label}
-                    </span>
-                    <span className="text-[10px] text-gray-500">{alert.timestamp}</span>
+              recent.map((a) => (
+                <div key={a.id} className="p-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-slate-200">{a.ai_attack_type ?? "Anomalous traffic"}</span>
+                    <span className="text-[10px] text-slate-500">{timeLabel(a)}</span>
                   </div>
-                  <div className="mt-2 text-xs text-gray-300">
-                    <p>Target Port: <span className="font-mono text-white">{alert.destination_port}</span></p>
-                    <p>Anomaly Score: <span className="font-mono text-white">{alert.score.toFixed(3)}</span></p>
+                  <div className="mt-1 flex items-center gap-2 text-slate-400">
+                    <VerdictBadge verdict={a.final_verdict} />
+                    <span className="font-mono">{a.src_ip ?? "?"} → {a.dst_port}</span>
                   </div>
                 </div>
               ))
             )}
           </div>
+          <Link href="/logs" onClick={() => setOpen(false)}
+            className="block border-t border-slate-800 py-2 text-center text-xs text-sky-400 hover:bg-slate-800">
+            Open audit log
+          </Link>
         </div>
       )}
     </div>
