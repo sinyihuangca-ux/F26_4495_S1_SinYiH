@@ -1,14 +1,18 @@
 import datetime
+import json
 from typing import List, Dict, Any
 
 # Import FastAPI components for API and WebSocket support
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException
 
 # Import CORS middleware to allow frontend access
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import Pydantic model for request validation
 from pydantic import BaseModel
+
+# HTTP client for calling external AI providers (Groq / Gemini / OpenAI)
+import httpx
 
 # Custom parser that converts raw logs into structured records
 from app.parser import parse_log_batch
@@ -40,6 +44,12 @@ PERSISTENT_LOG_LEDGER: List[Dict[str, Any]] = []
 # Request model for log ingestion endpoint
 class LogIngestRequest(BaseModel):
     logs: List[Dict[str, Any]]
+
+
+# Request model for multi-model AI threat analysis endpoint
+class ThreatAnalysisRequest(BaseModel):
+    threat_counts: Dict[str, int]
+    keys: List[Dict[str, str]]
 
 
 class ConnectionManager:
@@ -81,6 +91,76 @@ class ConnectionManager:
 
 # Create a global WebSocket manager instance
 manager = ConnectionManager()
+
+
+def _build_advisor_prompt(threat_counts: Dict[str, int]) -> str:
+    return (
+        "You are a Senior Cybersecurity SOC AI Advisor. "
+        f"Analyze these active network threats captured by our ML detection engine: {json.dumps(threat_counts)}. "
+        "Return ONLY a raw valid JSON array (no markdown code blocks, no backticks) "
+        "sorted strictly by severity (CRITICAL first, then HIGH, MEDIUM, LOW) in this exact structure:\n"
+        "[\n"
+        "  {\n"
+        '    "attack_type": "Ransomware",\n'
+        '    "severity": "CRITICAL",\n'
+        '    "count": 3,\n'
+        '    "advice": "Isolate affected hosts immediately, block suspicious outbound ports, and verify backups."\n'
+        "  }\n"
+        "]"
+    )
+
+
+async def _call_groq(api_key: str, prompt: str) -> str:
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+
+
+async def _call_gemini(api_key: str, prompt: str) -> str:
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        resp = await client.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2},
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+async def _call_openai(api_key: str, prompt: str) -> str:
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        resp = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
 
 
 @app.get("/")
@@ -217,6 +297,62 @@ async def analyze_stored_logs(
         "anomalies_flagged": len(flagged),
         "sample_results": results[:10]
     }
+
+
+@app.post("/api/analyze-threats")
+async def analyze_threats(payload: ThreatAnalysisRequest):
+    """
+    Analyzes active ML-detected threat counts using configured AI keys
+    with automatic failover across providers (Groq -> Gemini -> OpenAI).
+    """
+    if not payload.threat_counts:
+        raise HTTPException(
+            status_code=400,
+            detail="No threat_counts provided for analysis."
+        )
+
+    if not payload.keys:
+        raise HTTPException(
+            status_code=400,
+            detail="No AI API keys provided."
+        )
+
+    prompt = _build_advisor_prompt(payload.threat_counts)
+    errors = []
+
+    for entry in payload.keys:
+        provider = (entry.get("provider") or "").lower().strip()
+        api_key = (entry.get("key") or "").strip()
+        if not api_key:
+            continue
+
+        try:
+            if provider == "groq":
+                raw_text = await _call_groq(api_key, prompt)
+            elif provider == "gemini":
+                raw_text = await _call_gemini(api_key, prompt)
+            elif provider == "openai":
+                raw_text = await _call_openai(api_key, prompt)
+            else:
+                continue
+
+            cleaned = raw_text.replace("```json", "").replace("```", "").strip()
+            # Validate JSON structure before returning to frontend
+            parsed_json = json.loads(cleaned)
+
+            return {
+                "status": "success",
+                "provider_used": provider,
+                "result": json.dumps(parsed_json)
+            }
+        except Exception as exc:
+            errors.append(f"{provider}: {str(exc)}")
+            continue
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"All configured AI providers failed: {' | '.join(errors)}"
+    )
 
 
 @app.get("/api/logs/history")
