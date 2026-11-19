@@ -15,7 +15,27 @@ https://collegedouglas-my.sharepoint.com/:f:/r/personal/huangs36_student_douglas
 
 ## Quick start
 
-All commands start from the project root (`F26_4495_S1_SinYiH`).
+### One command (Windows)
+
+From the project root (`F26_4495_S1_SinYiH`):
+
+```powershell
+.\start.ps1              # backend + dashboard, opens the browser
+.\start.ps1 -Simulate    # also starts the attack simulator against this PC
+```
+
+The first run creates `.venv`, installs the Python and npm packages, trains the model
+if it's missing, and creates `.env` / `.env.local` from the examples. Later runs skip
+whatever is already in place. The backend and dashboard each open in their own
+window; close them to stop. If Windows blocks the script, run
+`powershell -ExecutionPolicy Bypass -File .\start.ps1`.
+
+You still need to put your Clerk keys in `Implementation/apps/web-frontend/.env.local`
+(and `CLERK_PUBLISHABLE_KEY` in the root `.env`) once.
+
+### Step by step
+
+All commands start from the project root.
 
 ### 1. Backend (FastAPI + ML engine)
 

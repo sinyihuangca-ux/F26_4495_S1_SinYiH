@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0 - 2026-11-19
+
+- Added `start.ps1`, which starts the backend and dashboard with one command, each in its own
+  window. It handles first-run setup (venv, pip and npm installs, model training, `.env`
+  files) and skips any step that's already done. `-Simulate` also starts the attack
+  simulator against this PC, and `-NoBrowser` skips opening the dashboard.
+
 ## 2.0.0 - 2026-11-19 (branch `rebuild`)
 
 A rebuild of the backend, simulator and dashboard. The core flow is unchanged: the
