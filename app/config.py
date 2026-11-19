@@ -46,13 +46,20 @@ DEFAULT_SETTINGS: dict = {
     "provider_order": list(PROVIDERS),
     "models": {
         "gemini": "gemini-2.5-flash",
-        "groq": "llama-3.3-70b-versatile",
+        "groq": "openai/gpt-oss-120b",
         "openai": "gpt-4o-mini",
         "claude": "claude-haiku-4-5",
     },
     "notify_enabled": True,
     # Minimum seconds between ntfy pushes; alerts in between are summarised.
     "notify_cooldown": 30,
+}
+
+# Model names providers have shut down -> what to use instead.
+# Groq retired the Llama 3.x models for free/developer accounts on 2026-08-16.
+RETIRED_MODELS = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
 }
 
 # Clerk: set one of these so the backend can verify dashboard users.

@@ -184,17 +184,27 @@ def flow_prompt(flows: list[dict]) -> str:
             "id": f["id"],
             "protocol": f.get("protocol"),
             **{k: feats[k] for k in AI_FEATURES if k in feats},
+            "context": f.get("context", {}),
         })
     return (
         "You are a SOC analyst reviewing network flow records (CICFlowMeter features, "
-        "CIC-IDS-2017 style). For each flow, decide whether it looks benign, suspicious "
-        "or malicious. Not everything is clear-cut: use 'suspicious' when the evidence is "
-        "mixed, and give an honest confidence between 0 and 1. Ordinary web, DNS and "
-        "background traffic is normal; do not flag a flow only because a value is large.\n\n"
+        "CIC-IDS-2017 style). Decide for each flow whether it is benign, suspicious or "
+        "malicious.\n\n"
+        "Each flow has a `context` block describing recent traffic around it (last 10 "
+        "minutes): how many flows hit the same destination IP+port, from how many sources "
+        "and over how many seconds, and how many ports/hosts the same source touched. Use "
+        "it: many short, similar flows to one service in seconds suggests a flood (DoS/DDoS) "
+        "or brute force; one source touching many ports suggests a port scan. A single flow "
+        "can look normal while its context shows an attack, and vice versa.\n\n"
+        "When the verdict is suspicious or malicious, name the most likely attack type even "
+        "if you are not certain (e.g. DDoS, DoS, PortScan, Brute Force, Web Attack - XSS, "
+        "Web Attack - SQL Injection, Infiltration, Botnet), and let `confidence` (0-1) carry "
+        "your uncertainty. Use 'suspicious' when the evidence is mixed. In `reason`, cite "
+        "the specific values that drove the call.\n\n"
         "Return ONLY a JSON object of the form "
         '{"results": [{"id": <id>, "verdict": "benign|suspicious|malicious", '
-        '"attack_type": "<e.g. DDoS, PortScan, Brute Force, XSS, SQL Injection, Infiltration, or null>", '
-        '"confidence": <0-1>, "reason": "<one short sentence>"}]}\n\n'
+        '"attack_type": "<name or null if benign>", "confidence": <0-1>, '
+        '"reason": "<one sentence citing values>"}]}\n\n'
         f"Flows:\n{json.dumps(items, separators=(',', ':'))}"
     )
 
@@ -277,6 +287,8 @@ class AIReviewer:
         flows = [f for f in (store.get_flow(i, with_features=True) for i in ids) if f]
         if not flows:
             return
+        for f in flows:
+            f["context"] = store.flow_context(f)
         try:
             data, provider = await ai_client.generate(flow_prompt(flows), settings)
             results = parse_results(data, {f["id"] for f in flows})
@@ -297,11 +309,63 @@ class AIReviewer:
 ai_reviewer = AIReviewer()
 
 
-def briefing_prompt(threat_counts: dict) -> str:
+ADVISOR_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+
+def advisor_prompt(incidents: list[dict]) -> str:
+    """incidents: summaries from detection.incidents (key, title, evidence)."""
+    payload = [{"key": i["key"], "title": i["title"], "evidence": i["evidence"]} for i in incidents]
     return (
-        "You are a senior SOC analyst. These are counts of network threats detected in the "
-        f"last monitoring window:\n{json.dumps(threat_counts, indent=2)}\n\n"
-        "Rank them by operational risk and give a concrete mitigation for each. Return ONLY "
-        'a JSON object: {"results": [{"attack_type": str, "severity": "CRITICAL|HIGH|MEDIUM|LOW", '
-        '"count": int, "advice": str}]}, sorted CRITICAL first.'
+        "You are a senior SOC analyst acting as an advisor. Below are incidents detected on "
+        "a network: flagged flows grouped by target service, or by source when one source "
+        "touched many ports (a likely scan). For each incident you get measured evidence: "
+        "volume and rate, sources and targets, median flow features (durations in "
+        "microseconds), the share of flows carrying each TCP flag, the ML anomaly scores "
+        "(0-1, where 0.9 means more unusual than 90% of normal training traffic) and any "
+        "per-flow AI verdicts.\n\n"
+        "For each incident, commit to your best assessment of what it is, even when unsure, "
+        "and say how sure you are. Be specific to THIS evidence: cite the numbers that point "
+        "to your conclusion, name the affected hosts and ports, and give concrete steps that "
+        "fit this attack on this service. Do not give generic security advice (no 'implement "
+        "MFA', 'review logs', 'update IDS rules' unless tied to a specific finding). Steps "
+        "only, no shell commands. If the evidence looks like a false positive, say so.\n\n"
+        "Return ONLY a JSON object:\n"
+        '{"incidents": [{"key": "<key as given>", '
+        '"assessment": "<attack name, e.g. HTTP flood (DDoS)>", '
+        '"confidence": <0-1>, "severity": "CRITICAL|HIGH|MEDIUM|LOW", '
+        '"summary": "<one or two sentences: what is happening, to what, from where>", '
+        '"evidence": ["<specific observation with numbers>", ...], '
+        '"alternatives": ["<other explanation and why it is less likely>", ...], '
+        '"actions": ["<concrete step for this host/port>", ...], '
+        '"verify": ["<what to check to confirm or rule this out>", ...]}]}\n\n'
+        f"Incidents:\n{json.dumps(payload, separators=(',', ':'))}"
     )
+
+
+def parse_advisor(data, keys: set[str]) -> dict[str, dict]:
+    rows = data.get("incidents", data) if isinstance(data, dict) else data
+    out = {}
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict) or r.get("key") not in keys:
+            continue
+        sev = str(r.get("severity", "")).upper()
+        try:
+            conf = min(max(float(r.get("confidence", 0.5)), 0.0), 1.0)
+        except (TypeError, ValueError):
+            conf = 0.5
+
+        def strings(field, n=6):
+            v = r.get(field) or []
+            return [str(x)[:400] for x in (v if isinstance(v, list) else [v])][:n]
+
+        out[r["key"]] = {
+            "assessment": str(r.get("assessment") or "Unclassified anomaly")[:120],
+            "confidence": round(conf, 2),
+            "severity": sev if sev in ADVISOR_SEVERITIES else "MEDIUM",
+            "summary": str(r.get("summary", ""))[:600],
+            "evidence": strings("evidence"),
+            "alternatives": strings("alternatives", 3),
+            "actions": strings("actions", 8),
+            "verify": strings("verify", 4),
+        }
+    return out

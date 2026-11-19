@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.2.0 - 2026-11-19
+
+### AI advisor (the "Analyse priority" briefing)
+- **Rebuilt around incidents instead of category counts.** The old briefing only saw
+  totals like `{"Suspicious traffic": 732}`, so its advice was generic. Flagged flows
+  are now grouped into incidents (`app/detection/incidents.py`):
+  - by target service (dst IP + port);
+  - a source that touches 10+ ports only lightly becomes one "scan" incident (its heavy
+    traffic to a single port stays a separate target incident, so a DDoS and a port scan
+    from the same attacker IP aren't merged);
+  - a quiet gap of 5+ minutes starts a new incident, so separate attack runs stay apart.
+- Each incident carries measured evidence: rate, sources and targets, median packet,
+  byte and duration values, TCP flag shares, ML score range, and per-flow AI verdicts.
+  The dataset label is still never included.
+- The advisor commits to an assessment for each incident (e.g. "HTTP flood (DDoS)") with
+  a confidence level, the specific evidence behind it, alternative explanations, concrete
+  steps for that host and port (no commands), and what to check to confirm it.
+- **Briefings are saved** (`incident_briefs` table). "Analyse priority" only sends incidents
+  that are new, or have grown by at least 10% (and at least 5 flows) since their last
+  briefing, so incidents it has already read don't cost tokens. Each card has a refresh
+  button to force a re-read. New endpoint `GET /api/incidents` shows saved briefings
+  without calling the AI.
+
+### Per-flow AI review
+- Each flow is now sent with its context from the last 10 minutes: flows to the same
+  IP+port, distinct sources, time span, and ports/hosts touched by the same source. A
+  DDoS or brute force looks ordinary one flow at a time, so this lets the AI name volume
+  attacks. The prompt also asks it to name an attack type whenever it flags a flow.
+
+### Fixes
+- Groq retired `llama-3.3-70b-versatile` on 2026-08-16 (every Groq call was returning
+  404). The default is now `openai/gpt-oss-120b`, and saved settings that still use a
+  retired name are switched automatically.
+- The source port is stored with each flow, for incident evidence.
+- Tests: 26 (added grouping, briefing cache, per-flow context, model migration).
+
 ## 2.1.0 - 2026-11-19
 
 - Added `start.ps1`, which starts the backend and dashboard with one command, each in its own

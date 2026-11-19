@@ -20,7 +20,9 @@ from pydantic import BaseModel, Field
 from app import store
 from app.auth import require_user
 from app.config import CORS_ORIGINS, DEFAULT_SETTINGS, ENV_PATH, PROVIDERS, SECRET_KEYS
-from app.detection.ai import ProviderError, ai_client, ai_reviewer, briefing_prompt, provider_key
+from app.detection import incidents as incident_mod
+from app.detection.ai import (ProviderError, advisor_prompt, ai_client, ai_reviewer, parse_advisor,
+                              provider_key)
 from app.detection.features import ID_COLUMNS, _num, flow_meta, normalise_record
 from app.detection.ml import ml_engine, ml_verdict
 from app.detection.verdict import combine
@@ -153,6 +155,8 @@ async def ingest(logs: list[dict[str, Any]] = Body(...)):
         meta = flow_meta(row)
         label = row.get("Label")
         features = {k: _num(v) for k, v in row.items() if k not in ID_COLUMNS}
+        if row.get("Source Port") is not None:  # not a model feature; used for incident evidence
+            features["Source Port"] = _num(row["Source Port"])
         mv = (ml_verdict(score, settings["ml_suspicious_threshold"], settings["ml_malicious_threshold"])
               if use_ml else None)
         allowed = store.is_allowed(meta["src_ip"], meta["dst_port"])
@@ -338,24 +342,95 @@ def update_settings(body: SettingsUpdate, user=Depends(require_user)):
     return settings_view()
 
 
-# ---------- AI threat briefing ----------
+# ---------- AI advisor (incident briefings) ----------
+
+MAX_INCIDENTS = 12        # largest incidents considered per briefing
+INCIDENTS_PER_CALL = 4    # keeps each prompt and answer a manageable size
+SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+
+
+def needs_brief(inc: dict, cached: Optional[dict]) -> bool:
+    """Skip incidents the AI has already read, unless they have grown meaningfully."""
+    if cached is None:
+        return True
+    grown = inc["flow_count"] - cached["flow_count"]
+    return grown >= max(5, 0.1 * cached["flow_count"])
+
+
+def incident_view(inc: dict, cached: Optional[dict], fresh: bool) -> dict:
+    ev = inc["evidence"]
+    return {
+        "key": inc["key"], "kind": inc["kind"], "title": inc["title"],
+        "flow_count": inc["flow_count"], "first_seen": inc["first_seen"], "last_seen": inc["last_seen"],
+        "stats": {k: ev[k] for k in ("flows_per_s", "time_span_s", "distinct_sources", "top_sources",
+                                      "top_targets", "distinct_dst_ports")}
+                 | {"ml_score_median": ev["ml"]["score_median"], "final_verdicts": ev["final_verdicts"]},
+        "brief": cached["brief"] if cached else None,
+        "provider": cached["provider"] if cached else None,
+        "briefed_at": cached["created_at"] if cached else None,
+        "new_flows_since_brief": inc["flow_count"] - cached["flow_count"] if cached else None,
+        "stale": needs_brief(inc, cached),   # what "Analyse priority" would send to the AI
+        "fresh": fresh,
+    }
+
+
+def sort_views(views: list[dict]) -> list[dict]:
+    return sorted(views, key=lambda v: (
+        SEVERITY_ORDER.get((v["brief"] or {}).get("severity"), 9 if v["brief"] is None else 4),
+        -v["flow_count"]))
+
+
+@app.get("/api/incidents")
+def list_incidents():
+    """Current incidents with their last saved briefing (no AI call)."""
+    incs = incident_mod.build(store.flagged_flows_with_features())[:MAX_INCIDENTS]
+    briefs = store.get_briefs()
+    return sort_views([incident_view(i, briefs.get(i["key"]), False) for i in incs])
+
+
+class AnalyzeRequest(BaseModel):
+    force_keys: list[str] = []   # re-brief these even if already read
+    force_all: bool = False
+
 
 @app.post("/api/analyze-threats")
-async def analyze_threats(threat_counts: Optional[dict[str, int]] = Body(None, embed=True)):
-    """Severity-ranked briefing with mitigation advice. Uses the current threat counts
-    from the database unless the request supplies its own."""
-    counts = threat_counts or store.stats()["by_type"]
-    if not counts:
+async def analyze_threats(body: AnalyzeRequest = Body(default_factory=AnalyzeRequest)):
+    """AI advisor: assess each incident (what it probably is, how sure, the evidence,
+    and specific steps). Incidents already briefed are reused, not re-sent, unless they
+    have grown or are forced."""
+    incs = incident_mod.build(store.flagged_flows_with_features())[:MAX_INCIDENTS]
+    if not incs:
         raise HTTPException(400, "No threats detected yet - run the attack simulator first.")
-    try:
-        data, provider = await ai_client.generate(briefing_prompt(counts), store.get_settings())
-    except ProviderError as e:
-        raise HTTPException(502, f"AI briefing failed: {e}")
-    items = data.get("results", data) if isinstance(data, dict) else data
-    order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-    items = sorted([i for i in items if isinstance(i, dict)],
-                   key=lambda i: order.get(str(i.get("severity", "")).upper(), 9))
-    return {"provider_used": provider, "result": items}
+    briefs = store.get_briefs()
+    todo = [i for i in incs if body.force_all or i["key"] in body.force_keys
+            or needs_brief(i, briefs.get(i["key"]))]
+
+    settings = store.get_settings()
+    fresh_keys, errors, provider_used = set(), [], None
+    for start in range(0, len(todo), INCIDENTS_PER_CALL):
+        chunk = todo[start:start + INCIDENTS_PER_CALL]
+        try:
+            data, provider = await ai_client.generate(advisor_prompt(chunk), settings)
+        except ProviderError as e:
+            errors.append(str(e))
+            break
+        parsed = parse_advisor(data, {i["key"] for i in chunk})
+        for inc in chunk:
+            if inc["key"] in parsed:
+                store.save_brief(inc["key"], inc["flow_count"], inc["max_flow_id"], parsed[inc["key"]], provider)
+                fresh_keys.add(inc["key"])
+        provider_used = provider
+
+    if todo and not fresh_keys and errors and not briefs:
+        raise HTTPException(502, f"AI advisor failed: {errors[-1]}")
+    briefs = store.get_briefs()
+    return {
+        "provider_used": provider_used,
+        "analysed": len(fresh_keys),
+        "reused": len([i for i in incs if i["key"] in briefs and i["key"] not in fresh_keys]),
+        "error": errors[-1] if errors else None,
+        "incidents": sort_views([incident_view(i, briefs.get(i["key"]), i["key"] in fresh_keys) for i in incs]),
+    }
 
 
 # ---------- RSS feed of malicious flows ----------

@@ -122,7 +122,14 @@ Pick a scenario (DDoS, PortScan, web attacks, infiltration, or benign-only traff
    - if one engine says malicious and the other says benign, the flow becomes "suspicious" for a human to decide.
    - AI calls below the confidence threshold (default 60%) can't clear or escalate anything.
    - flows matching an allowlist rule are never alerted on.
-4. **Analyst feedback.** On the Logs and Threats pages you can mark a flow as a real
+4. **AI advisor ("Analyse priority").** Flagged flows are grouped into incidents
+   (per target service, a separate "scan" incident when one source touches many ports,
+   and a new incident after a 5-minute quiet gap). For each incident the advisor gives
+   its best assessment of the attack, a confidence level, the evidence behind it,
+   specific steps, and what to check to confirm it. Briefings are saved; clicking again
+   only re-analyses incidents that are new or have grown, and the refresh icon on a card
+   forces a re-read.
+5. **Analyst feedback.** On the Logs and Threats pages you can mark a flow as a real
    threat or a false positive (optionally allowlisting its source IP and port).
    False positives become extra normal-traffic examples the next time you train.
 
@@ -176,7 +183,8 @@ DocumentsAndReports/      proposal and progress reports
 | POST | `/api/flows/{id}/feedback` | `{"feedback": "false_positive" or "confirmed" or null, "allowlist": bool}` |
 | GET | `/api/stats` | Counts and per-engine accuracy. |
 | GET/PUT | `/api/settings` | Engine switches, thresholds, providers and keys (keys always masked). |
-| POST | `/api/analyze-threats` | AI briefing that ranks the current threats by severity. |
+| GET | `/api/incidents` | Current incidents with their saved AI briefing (no AI call). |
+| POST | `/api/analyze-threats` | AI advisor: briefs new or grown incidents; `{"force_keys": [...]}` re-briefs specific ones. |
 | GET | `/api/health` | Model status, AI provider status, queue size. |
 | WS | `/ws/alerts` | Live `FLOW`, `FLOW_UPDATED` and `STATS` messages. |
 
