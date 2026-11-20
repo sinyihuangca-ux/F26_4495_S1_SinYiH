@@ -10,7 +10,7 @@ import pytest
 _tmp = tempfile.mkdtemp()
 os.environ["THREAT_DB_PATH"] = str(Path(_tmp) / "test.db")
 os.environ["THREAT_ENV_FILE"] = str(Path(_tmp) / ".env")
-for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NTFY_TOPIC",
+for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
           "CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_JWKS_URL"):
     os.environ.pop(k, None)
 
@@ -292,3 +292,14 @@ def test_retired_groq_model_is_migrated():
     store.save_settings({"models": {"gemini": "gemini-2.5-flash", "groq": "llama-3.3-70b-versatile",
                                     "openai": "gpt-4o-mini", "claude": "claude-haiku-4-5"}})
     assert store.get_settings()["models"]["groq"] == "openai/gpt-oss-120b"
+
+
+def test_notification_settings():
+    with TestClient(app) as c:
+        health = c.get("/api/health").json()["notifications"]
+        assert health == {"notify_enabled": True, "notify_min_verdict": "malicious", "notify_cooldown": 30}
+        assert c.put("/api/settings", json={"settings": {"notify_min_verdict": "benign"}}).status_code == 400
+        ok = c.put("/api/settings", json={"settings": {"notify_min_verdict": "suspicious", "notify_cooldown": 10}})
+        assert ok.status_code == 200
+        assert c.get("/api/health").json()["notifications"]["notify_min_verdict"] == "suspicious"
+        assert "ntfy_topic" not in ok.json()["secrets"]

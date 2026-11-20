@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 import { ArrowDown, ArrowUp, Save, Settings as SettingsIcon, Trash2 } from "lucide-react";
 import { api, setServer, Settings, SettingsView } from "@/lib/api";
 import { useLive } from "@/lib/live";
+import { useNotify } from "@/lib/notify";
 
 const PROVIDER_NAMES: Record<string, string> = {
   gemini: "Google Gemini",
@@ -74,6 +75,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 export default function SettingsPage() {
   const { getToken } = useAuth();
   const { reconnect, status, server } = useLive();
+  const { permission, requestPermission, reloadSettings } = useNotify();
   const serverInput = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<SettingsView | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
@@ -122,6 +124,7 @@ export default function SettingsPage() {
       setDraft(v.settings);
       setKeys({});
       setMessage({ ok: true, text: "Saved. Keys are stored in the backend's .env file." });
+      reloadSettings();
       setHealth(await api<Health>("/api/health"));
     } catch (e) {
       setMessage({ ok: false, text: (e as Error).message });
@@ -275,15 +278,39 @@ export default function SettingsPage() {
             )}
           </Section>
 
-          <Section title="Push notifications" hint="Malicious flows are pushed to ntfy.sh. Subscribe to the same topic in the ntfy app.">
-            <Toggle label="Send push notifications" checked={draft.notify_enabled} onChange={(v) => set("notify_enabled", v)} />
-            <input type="password" autoComplete="off" className={input}
-              placeholder={view.secrets.ntfy_topic ? `Topic saved: ${view.secrets.ntfy_topic}` : "ntfy topic (pick something hard to guess)"}
-              value={keys.ntfy_topic ?? ""} onChange={(e) => setKeys((k) => ({ ...k, ntfy_topic: e.target.value }))} />
-            <label className="block text-sm text-slate-300">At most one push every (seconds)
+          <Section title="Attack notifications"
+            hint="The dashboard pops up an alert when attacks come in: a banner on the page, or a Windows notification when the tab is in the background. One popup per attacked target, then a roll-up of further flows.">
+            <Toggle label="Show attack notifications" checked={draft.notify_enabled} onChange={(v) => set("notify_enabled", v)} />
+            <label className="block text-sm text-slate-300">Notify on
+              <select className={`${input} mt-1`} value={draft.notify_min_verdict}
+                onChange={(e) => set("notify_min_verdict", e.target.value as Settings["notify_min_verdict"])}>
+                <option value="malicious">Malicious flows only</option>
+                <option value="suspicious">Malicious and suspicious flows</option>
+              </select>
+            </label>
+            <label className="block text-sm text-slate-300">At most one popup per target every (seconds)
               <input type="number" min={0} className={`${input} mt-1`} value={draft.notify_cooldown}
                 onChange={(e) => set("notify_cooldown", Number(e.target.value))} />
             </label>
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm">
+              <span className="text-slate-300">
+                Windows notifications:{" "}
+                <span className={permission === "granted" ? "text-emerald-400" : permission === "denied" ? "text-red-400" : "text-amber-300"}>
+                  {permission === "granted" ? "allowed" : permission === "denied" ? "blocked in browser settings"
+                    : permission === "unsupported" ? "not supported by this browser" : "not enabled yet"}
+                </span>
+              </span>
+              {permission === "default" && (
+                <button onClick={requestPermission} className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium hover:bg-sky-500">
+                  Enable browser notifications
+                </button>
+              )}
+            </div>
+            {permission === "denied" && (
+              <p className="text-xs text-slate-500">
+                Click the lock icon next to the address bar, set Notifications to Allow, then reload. In-page banners still work meanwhile.
+              </p>
+            )}
           </Section>
         </>
       )}

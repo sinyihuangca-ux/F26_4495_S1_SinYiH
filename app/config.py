@@ -1,6 +1,6 @@
 """Paths, environment loading and default settings.
 
-Secrets (AI provider keys, ntfy topic) live in the project-root .env file.
+Secrets (AI provider keys) live in the project-root .env file.
 Everything else the dashboard can change is stored in SQLite (see store.py).
 """
 import os
@@ -24,10 +24,12 @@ SECRET_KEYS = {
     "groq": "GROQ_API_KEY",
     "openai": "OPENAI_API_KEY",
     "claude": "ANTHROPIC_API_KEY",
-    "ntfy_topic": "NTFY_TOPIC",
 }
 
 PROVIDERS = ["gemini", "groq", "openai", "claude"]
+
+# Allowed values for settings that are a fixed choice.
+CHOICE_SETTINGS = {"notify_min_verdict": ("malicious", "suspicious")}
 
 # Non-secret settings and their defaults. Types here are used to validate updates.
 DEFAULT_SETTINGS: dict = {
@@ -50,8 +52,12 @@ DEFAULT_SETTINGS: dict = {
         "openai": "gpt-4o-mini",
         "claude": "claude-haiku-4-5",
     },
+    # Browser notifications raised by the dashboard (see web-frontend lib/notify.tsx).
     "notify_enabled": True,
-    # Minimum seconds between ntfy pushes; alerts in between are summarised.
+    # Lowest final verdict that notifies: "malicious" or "suspicious".
+    "notify_min_verdict": "malicious",
+    # Per incident (target IP+port): at most one popup per this many seconds;
+    # flows in between are rolled into the next update.
     "notify_cooldown": 30,
 }
 

@@ -73,7 +73,7 @@ All commands start from the project root.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-copy .env.example .env          # then set CLERK_PUBLISHABLE_KEY (see below)
+# create .env with CLERK_PUBLISHABLE_KEY=<your pk_test_ key> (start.ps1 makes a blank one)
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -83,7 +83,7 @@ Check http://localhost:8000/api/health. `model_loaded` should be `true`.
 
 ```powershell
 cd Implementation/apps/web-frontend
-copy .env.example .env.local    # fill in your Clerk keys
+# create .env.local with your Clerk keys (start.ps1 makes a blank one)
 npm install
 npm run dev
 ```
@@ -93,7 +93,8 @@ Open http://localhost:3000/dashboard and sign in. Under **Settings**:
 - paste at least one AI key (Groq's free tier works). It is sent to the backend and
   saved in the root `.env`; the dashboard only ever shows it masked.
 - switch the ML or AI engine on or off, and tune the thresholds.
-- set an ntfy topic if you want phone notifications for malicious flows.
+- choose which attacks raise notifications, and click **Enable browser notifications**
+  so alerts also pop up as Windows notifications when the tab is in the background.
 
 ### 3. Attack simulator (second PC or terminal)
 
@@ -164,7 +165,6 @@ app/                      FastAPI backend
   detection/features.py   CIC-IDS record -> feature vector
   store.py                SQLite (threats.db): flows, feedback, allowlist, settings
   auth.py                 Clerk token check for endpoints that change things
-  notify.py               ntfy.sh push notifications (rate-limited, non-blocking)
   train.py                training script
   models/ml_bundle.joblib trained models
 data/                     attack_simulator.py and the four simulation CSVs
