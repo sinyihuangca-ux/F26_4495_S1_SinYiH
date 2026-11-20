@@ -2,9 +2,11 @@
 
 // One WebSocket connection to the backend, shared by every dashboard page and the
 // notification bell. Reconnects automatically and refreshes data when it does.
+// New or escalated flows are passed to the notifier (lib/notify.tsx).
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api, Flow, getServer, Stats, wsUrl } from "./api";
+import { useNotify } from "./notify";
 
 type Status = "connecting" | "connected" | "disconnected";
 
@@ -35,6 +37,9 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   const [unread, setUnread] = useState(0);
   const [generation, setGeneration] = useState(0);
   const retry = useRef(0);
+  const { consider } = useNotify();
+  // Last known verdict per flow, so an AI review that escalates a flow can notify.
+  const verdicts = useRef(new Map<number, Flow["final_verdict"]>());
   // Read from localStorage on the client only; re-read whenever we reconnect.
   const server = useSyncExternalStore(
     useCallback((cb: () => void) => { window.addEventListener("storage", cb); return () => window.removeEventListener("storage", cb); }, []),
@@ -89,6 +94,8 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         }
         if (msg.type === "STATS" && msg.stats) setStats(msg.stats);
         if ((msg.type === "FLOW" || msg.type === "FLOW_UPDATED") && msg.flow) {
+          consider(msg.flow, verdicts.current.get(msg.flow.id));
+          verdicts.current.set(msg.flow.id, msg.flow.final_verdict);
           upsert(msg.flow);
           if (msg.type === "FLOW" && msg.flow.final_verdict !== "benign") setUnread((n) => n + 1);
         }
@@ -111,7 +118,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       clearInterval(poll);
       ws?.close();
     };
-  }, [generation, refresh, upsert]);
+  }, [generation, refresh, upsert, consider]);
 
   const value: LiveState = {
     status,

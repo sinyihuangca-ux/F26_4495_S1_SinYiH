@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { SignInButton, SignUpButton, UserButton, Show } from "@clerk/nextjs";
 import { Sidebar } from "@/components/sidebar";
 import { LiveProvider } from "@/lib/live";
+import { NotifyProvider } from "@/lib/notify";
 import { ConnectionBadge } from "@/components/connection-badge";
 import NotificationBell from "./components/NotificationBell";
 
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
+    <NotifyProvider>
     <LiveProvider>
       <div className="flex min-h-screen bg-[#0B0F19] text-white">
         <Sidebar />
@@ -41,5 +43,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </div>
     </LiveProvider>
+    </NotifyProvider>
   );
 }

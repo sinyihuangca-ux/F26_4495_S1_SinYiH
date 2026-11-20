@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.4.0 - 2026-11-20 (branch `feature/notification`)
+
+### Attack notifications from the dashboard
+- **Removed ntfy.sh.** It only worked with the ntfy app open. `app/notify.py`, the ntfy
+  topic setting and `NTFY_TOPIC` are gone.
+- **The dashboard now raises the notifications itself** (`lib/notify.tsx`):
+  - an alert banner on the page when the dashboard is in view;
+  - a Windows/browser notification when the tab is in the background or minimised
+    (needs one-time permission: Settings -> Attack notifications -> Enable browser
+    notifications);
+  - clicking either one opens Threats & Logs.
+- **One popup per incident.** The first qualifying flow to a target (IP + port) notifies
+  at once. Further flows are rolled into a "+N more" update, at most once per cooldown
+  (default 30 s). A source that hits 3+ different ports within a minute is treated as
+  one port-scan incident, so a 92-port scan gives about 5 notifications instead of 92.
+  Repeat notifications for the same incident replace each other instead of stacking.
+- **New setting `notify_min_verdict`**: notify on malicious flows only (default) or on
+  malicious + suspicious. Notifications can also be switched off. These settings are
+  included in `/api/health`, so every open dashboard tab reads them without signing in.
+- Works while at least one dashboard tab is open. It doesn't need the ntfy app or any
+  other service.
+
+### start.ps1
+- If an `.env.example` file is missing (both were removed from the repo), it now writes a
+  blank `.env` / `.env.local` template itself instead of failing.
+- It now stops with a clear message when `web-frontend\.env.local` has no real Clerk
+  publishable key, instead of the dashboard crashing with "Publishable key not valid".
+
+- Tests: 27 (added notification settings).
+
 ## 2.3.0 - 2026-11-20
 
 - **Merged the Logs and Threats pages** into one "Threats & Logs" page at `/logs`. They

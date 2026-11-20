@@ -58,6 +58,7 @@ export interface Settings {
   provider_order: string[];
   models: Record<string, string>;
   notify_enabled: boolean;
+  notify_min_verdict: "malicious" | "suspicious";
   notify_cooldown: number;
 }
 

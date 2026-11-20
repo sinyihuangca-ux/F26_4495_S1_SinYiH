@@ -19,14 +19,13 @@ from pydantic import BaseModel, Field
 
 from app import store
 from app.auth import require_user
-from app.config import CORS_ORIGINS, DEFAULT_SETTINGS, ENV_PATH, PROVIDERS, SECRET_KEYS
+from app.config import CHOICE_SETTINGS, CORS_ORIGINS, DEFAULT_SETTINGS, ENV_PATH, PROVIDERS, SECRET_KEYS
 from app.detection import incidents as incident_mod
 from app.detection.ai import (ProviderError, advisor_prompt, ai_client, ai_reviewer, parse_advisor,
                               provider_key)
 from app.detection.features import ID_COLUMNS, _num, flow_meta, normalise_record
 from app.detection.ml import ml_engine, ml_verdict
 from app.detection.verdict import combine
-from app.notify import notifier
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("api")
@@ -74,9 +73,6 @@ async def apply_ai_result(flow_id: int, result: dict) -> None:
     store.update_flow(flow_id, **result, final_verdict=final, agreement=agreement)
     updated = store.get_flow(flow_id)
     await manager.broadcast({"type": "FLOW_UPDATED", "flow": updated})
-    if final == "malicious" and flow["final_verdict"] != "malicious":
-        await notifier.alert(updated["ai_attack_type"] or "Anomalous traffic",
-                             updated["src_ip"], updated["dst_port"], settings)
 
 
 @asynccontextmanager
@@ -116,6 +112,7 @@ def health():
                "trained_on": ml_engine.bundle["meta"] if ml_engine.ready else None},
         "ai": {"enabled": settings["ai_enabled"], "backlog": ai_reviewer.backlog,
                "providers": ai_client.status(settings["provider_order"])},
+        "notifications": {k: settings[k] for k in ("notify_enabled", "notify_min_verdict", "notify_cooldown")},
         "dashboards_connected": len(manager.clients),
     }
 
@@ -179,8 +176,6 @@ async def ingest(logs: list[dict[str, Any]] = Body(...)):
         counts[final] += 1
         if final != "benign" or send_to_ai:
             await manager.broadcast({"type": "FLOW", "flow": store.get_flow(flow_id)})
-        if final == "malicious":
-            await notifier.alert("Anomalous traffic", meta["src_ip"], meta["dst_port"], settings)
 
     await manager.broadcast({"type": "STATS", "stats": store.stats()})
     return {
@@ -301,7 +296,10 @@ def update_settings(body: SettingsUpdate, user=Depends(require_user)):
         if k not in DEFAULT_SETTINGS:
             raise HTTPException(400, f"unknown setting: {k}")
         default = DEFAULT_SETTINGS[k]
-        if isinstance(default, bool):
+        if k in CHOICE_SETTINGS:
+            if v not in CHOICE_SETTINGS[k]:
+                raise HTTPException(400, f"{k} must be one of {list(CHOICE_SETTINGS[k])}")
+        elif isinstance(default, bool):
             if not isinstance(v, bool):
                 raise HTTPException(400, f"{k} must be true/false")
         elif isinstance(default, (int, float)):

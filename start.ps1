@@ -58,9 +58,24 @@ if (-not (Test-Path (Join-Path $Root "app\models\ml_bundle.joblib"))) {
     finally { Pop-Location }
 }
 
+# Create a missing env file from its .env.example, or from a built-in blank template
+# when the example isn't there.
+function New-EnvFile($target, $example, $template) {
+    if (Test-Path $example) { Copy-Item $example $target }
+    else { Set-Content -Path $target -Value $template -Encoding UTF8 }
+}
+
 if (-not (Test-Path (Join-Path $Root ".env"))) {
-    Copy-Item (Join-Path $Root ".env.example") (Join-Path $Root ".env")
-    Warn "Created .env from .env.example. Add CLERK_PUBLISHABLE_KEY to it so settings can be changed from other PCs."
+    New-EnvFile (Join-Path $Root ".env") (Join-Path $Root ".env.example") @"
+# Backend settings. AI keys are written here from the dashboard's Settings page.
+CLERK_PUBLISHABLE_KEY=
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+GEMINI_API_KEY=
+GROQ_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+"@
+    Warn "Created .env. Add CLERK_PUBLISHABLE_KEY to it so settings can be changed from other PCs."
 }
 
 # ---------- Next.js dashboard ----------
@@ -73,8 +88,23 @@ if (Outdated (Join-Path $Web "package-lock.json") $NpmMarker) {
 }
 
 if (-not (Test-Path (Join-Path $Web ".env.local"))) {
-    Copy-Item (Join-Path $Web ".env.example") (Join-Path $Web ".env.local")
+    New-EnvFile (Join-Path $Web ".env.local") (Join-Path $Web ".env.example") @"
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_API_URL=localhost:8000
+"@
     Warn "Created web-frontend\.env.local - fill in your Clerk keys, or sign-in won't work."
+}
+
+$EnvLocal = Join-Path $Web ".env.local"
+$pkLine = Select-String -Path $EnvLocal -Pattern '^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=(.*)$' | Select-Object -First 1
+$pk = if ($pkLine) { $pkLine.Matches[0].Groups[1].Value.Trim() } else { "" }
+if (-not $pk -or $pk -notmatch '^pk_(test|live)_\S{20,}') {
+    Warn "No real Clerk publishable key in web-frontend\.env.local (found '$pk')."
+    Warn "Put your pk_test_... and sk_test_... keys there (the dashboard reads only that file), then run this again."
+    exit 1
 }
 
 # ---------- Launch ----------
