@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  FileText,
   ShieldAlert,
   Settings,
   Shield,
@@ -12,8 +11,7 @@ import {
 
 const NAV_ITEMS = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Logs", icon: FileText, href: "/logs" },
-  { label: "Threats", icon: ShieldAlert, href: "/threats" },
+  { label: "Threats & Logs", icon: ShieldAlert, href: "/logs" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
 

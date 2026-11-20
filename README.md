@@ -129,7 +129,7 @@ Pick a scenario (DDoS, PortScan, web attacks, infiltration, or benign-only traff
    specific steps, and what to check to confirm it. Briefings are saved; clicking again
    only re-analyses incidents that are new or have grown, and the refresh icon on a card
    forces a re-read.
-5. **Analyst feedback.** On the Logs and Threats pages you can mark a flow as a real
+5. **Analyst feedback.** On the Threats & Logs page you can mark a flow as a real
    threat or a false positive (optionally allowlisting its source IP and port).
    False positives become extra normal-traffic examples the next time you train.
 

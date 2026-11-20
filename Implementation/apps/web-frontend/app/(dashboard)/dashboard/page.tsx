@@ -26,7 +26,7 @@ export default function DashboardPage() {
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-semibold text-white">Live alerts · ML vs AI</h3>
             <Link href="/logs" className="text-xs text-sky-400 hover:underline">
-              Full log →
+              Threats &amp; logs →
             </Link>
           </div>
           <FlowTable flows={alerts.slice(0, 15)} showTruth={false} />

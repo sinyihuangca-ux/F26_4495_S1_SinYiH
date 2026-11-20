@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.0 - 2026-11-20
+
+- **Merged the Logs and Threats pages** into one "Threats & Logs" page at `/logs`. They
+  showed largely the same flows. From top to bottom it has the active threat types next
+  to detection accuracy, the AI advisor, then the audit log. The audit log has a new
+  "Needs review" filter, now the default, which replaces the Threats page's separate table.
+  The sidebar has one entry instead of two, and `/threats` redirects to `/logs`.
+
 ## 2.2.0 - 2026-11-19
 
 ### AI advisor (the "Analyse priority" briefing)
