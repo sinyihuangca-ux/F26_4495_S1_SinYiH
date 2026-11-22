@@ -80,7 +80,8 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 export default function SettingsPage() {
   const { getToken } = useAuth();
   const { reconnect, status, server } = useLive();
-  const { permission, requestPermission, reloadSettings } = useNotify();
+  const { settings: notifySettings, reloadSettings } = useNotify();
+  const [testing, setTesting] = useState(false);
   const serverInput = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<SettingsView | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
@@ -135,6 +136,18 @@ export default function SettingsPage() {
       setMessage({ ok: false, text: (e as Error).message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const sendTest = async () => {
+    setTesting(true);
+    try {
+      await api("/api/notifications/test", { method: "POST" }, await getToken());
+      setMessage({ ok: true, text: "Test notification sent - check the bottom-right of the backend PC's screen." });
+    } catch (e) {
+      setMessage({ ok: false, text: (e as Error).message });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -287,7 +300,7 @@ export default function SettingsPage() {
           </Section>
 
           <Section title="Attack notifications"
-            hint="The dashboard pops up an alert when attacks come in: a banner on the page, or a Windows notification when the tab is in the background. One popup per attacked target, then a roll-up of further flows.">
+            hint="When attacks come in you get a Windows notification on the backend PC, plus a banner inside the dashboard. One popup per attacked target, then a roll-up of further flows.">
             <Toggle label="Show attack notifications" checked={draft.notify_enabled} onChange={(v) => set("notify_enabled", v)} />
             <label className="block text-sm text-slate-300">Notify on
               <select className={`${input} mt-1`} value={draft.notify_min_verdict}
@@ -303,22 +316,20 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm">
               <span className="text-slate-300">
                 Windows notifications:{" "}
-                <span className={permission === "granted" ? "text-emerald-400" : permission === "denied" ? "text-red-400" : "text-amber-300"}>
-                  {permission === "granted" ? "allowed" : permission === "denied" ? "blocked in browser settings"
-                    : permission === "unsupported" ? "not supported by this browser" : "not enabled yet"}
+                <span className={notifySettings.windows ? "text-emerald-400" : "text-amber-300"}>
+                  {notifySettings.windows ? "available on the backend PC" : "not available (backend isn't on Windows, or windows-toasts isn't installed)"}
                 </span>
               </span>
-              {permission === "default" && (
-                <button onClick={requestPermission} className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium hover:bg-sky-500">
-                  Enable browser notifications
-                </button>
-              )}
+              <button onClick={sendTest} disabled={testing}
+                className="shrink-0 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium hover:bg-sky-500 disabled:bg-slate-800">
+                {testing ? "Sending…" : "Send test notification"}
+              </button>
             </div>
-            {permission === "denied" && (
-              <p className="text-xs text-slate-500">
-                Click the lock icon next to the address bar, set Notifications to Allow, then reload. In-page banners still work meanwhile.
-              </p>
-            )}
+            <p className="text-xs text-slate-500">
+              Windows notifications pop up on the PC running the backend, even with the browser closed; clicking one opens
+              Threats &amp; Logs. If nothing appears, check Windows Settings → System → Notifications (and that Do Not
+              Disturb is off).
+            </p>
           </Section>
         </>
       )}

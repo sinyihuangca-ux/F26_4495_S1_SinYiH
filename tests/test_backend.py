@@ -297,7 +297,8 @@ def test_retired_groq_model_is_migrated():
 def test_notification_settings():
     with TestClient(app) as c:
         health = c.get("/api/health").json()["notifications"]
-        assert health == {"notify_enabled": True, "notify_min_verdict": "malicious", "notify_cooldown": 30}
+        assert health == {"notify_enabled": True, "notify_min_verdict": "malicious", "notify_cooldown": 30,
+                          "windows": False}
         assert c.put("/api/settings", json={"settings": {"notify_min_verdict": "benign"}}).status_code == 400
         ok = c.put("/api/settings", json={"settings": {"notify_min_verdict": "suspicious", "notify_cooldown": 10}})
         assert ok.status_code == 200
@@ -324,3 +325,54 @@ def test_ml_analyse_fields_stored():
         assert any(f["ml_attack_type"] for f in flows if f["ground_truth"] != "BENIGN")
     else:
         assert all(f["ml_attack_type"] is None for f in flows)
+
+
+# ---------- Windows notifications ----------
+
+from app.winnotify import WindowsNotifier  # noqa: E402
+
+_NS = {"notify_enabled": True, "notify_min_verdict": "malicious", "notify_cooldown": 30}
+
+
+def _nf(i, src, port, verdict="malicious", dst="192.168.10.50"):
+    return {"id": i, "src_ip": src, "dst_ip": dst, "dst_port": port, "final_verdict": verdict,
+            "ml_score": 0.97, "ml_attack_type": "DDoS", "ai_attack_type": None}
+
+
+def test_windows_notifier_groups_per_incident_and_scans():
+    shown = []
+    n = WindowsNotifier(show_fn=lambda tag, title, body: shown.append(title))
+    for i in range(50):                                   # flood on :80 -> one notification
+        n.consider(_nf(i, "172.16.0.1", 80), _NS)
+    assert len(n.sent) == 1 and n.sent[0][1] == "DDoS detected on 192.168.10.50:80"
+    for p in range(20, 40):                               # 20-port scan -> a scan incident
+        n.consider(_nf(100 + p, "10.0.0.9", p), _NS)
+    titles = [t for _, t, _ in n.sent]
+    assert sum(t.startswith("Possible port scan from 10.0.0.9") for t in titles) == 1
+    assert len(n.sent) <= 4                               # 2 before the scan is recognised + 1 scan
+    n.consider(_nf(500, "1.2.3.4", 22, verdict="suspicious"), _NS)  # below the threshold
+    assert len(n.sent) <= 4
+    n.consider(_nf(1, "172.16.0.1", 80), _NS)             # same flow again: ignored
+    assert len(n.sent) <= 4
+
+
+def test_windows_notifier_respects_settings_and_escalation():
+    n = WindowsNotifier(show_fn=None)
+    n.consider(_nf(1, "1.1.1.1", 22), {**_NS, "notify_enabled": False})
+    assert n.sent == []
+    n.consider(_nf(2, "1.1.1.1", 22, verdict="suspicious"), {**_NS, "notify_min_verdict": "suspicious"})
+    assert len(n.sent) == 1
+    # Escalation to malicious after AI review notifies when the threshold is malicious.
+    n2 = WindowsNotifier(show_fn=None)
+    n2.consider(_nf(3, "2.2.2.2", 443, verdict="suspicious"), _NS)
+    assert n2.sent == []
+    n2.consider(_nf(3, "2.2.2.2", 443), _NS, previous_verdict="suspicious")
+    assert len(n2.sent) == 1
+    assert n2.available is False and n2.test() is False
+
+
+def test_notification_test_endpoint_without_windows():
+    with TestClient(app) as c:
+        r = c.post("/api/notifications/test")
+        assert r.status_code == 503 and "windows-toasts" in r.json()["detail"]
+        assert c.get("/api/health").json()["notifications"]["windows"] is False

@@ -7,9 +7,8 @@
 //   counted and rolled into one "+N more" update when it ends. A source that hits
 //   several different ports in a short time is treated as one scan incident, so a
 //   port scan gives one popup instead of one per port.
-// * Visible tab: an in-page toast. Hidden or minimised tab: a Windows/browser
-//   notification (needs permission once; see Settings). Notifications for the same
-//   target replace each other instead of stacking.
+// * Shown as in-page banners. Windows notifications (outside the browser) come from
+//   the backend itself (app/winnotify.py), so they work even with the browser closed.
 // * Which verdicts notify, and the cooldown, come from Settings via /api/health.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -21,6 +20,7 @@ export interface NotifySettings {
   notify_enabled: boolean;
   notify_min_verdict: "malicious" | "suspicious";
   notify_cooldown: number;
+  windows?: boolean; // backend can show Windows notifications
 }
 
 interface Toast {
@@ -33,8 +33,6 @@ interface Toast {
 
 interface NotifyState {
   settings: NotifySettings;
-  permission: NotificationPermission | "unsupported";
-  requestPermission: () => Promise<void>;
   reloadSettings: () => void;
   // Called by the live feed for every flow it receives.
   consider: (flow: Flow, previousVerdict?: Flow["final_verdict"]) => void;
@@ -50,14 +48,9 @@ const SCAN_WINDOW_MS = 60000; // ...within this long
 const targetOf = (f: Flow) => `${f.dst_ip ?? "?"}:${f.dst_port ?? "?"}`;
 const attackOf = (f: Flow) => f.ai_attack_type ?? f.ml_attack_type ?? (f.final_verdict === "malicious" ? "Attack" : "Suspicious traffic");
 
-function currentPermission(): NotificationPermission | "unsupported" {
-  return typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported";
-}
-
 export function NotifyProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [settings, setSettings] = useState<NotifySettings>(DEFAULTS);
-  const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -75,33 +68,16 @@ export function NotifyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- read browser state after mount
-    setPermission(currentPermission());
     reloadSettings();
     const t = setInterval(reloadSettings, 30000);
     return () => clearInterval(t);
   }, [reloadSettings]);
 
-  const requestPermission = useCallback(async () => {
-    if (!("Notification" in window)) return;
-    setPermission(await Notification.requestPermission());
-  }, []);
-
   const show = useCallback((key: string, title: string, body: string, severe: boolean) => {
-    const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
-    if (hidden && currentPermission() === "granted") {
-      const n = new Notification(title, { body, tag: `threat-${key}`, requireInteraction: severe });
-      n.onclick = () => {
-        window.focus();
-        router.push("/logs");
-        n.close();
-      };
-      return;
-    }
     const id = nextId.current++;
     setToasts((t) => [...t.filter((x) => x.key !== key), { id, key, title, body, severe }].slice(-4));
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), TOAST_MS);
-  }, [router]);
+  }, []);
 
   const flush = useCallback((key: string) => {
     const inc = incidents.current.get(key);
@@ -157,7 +133,7 @@ export function NotifyProvider({ children }: { children: React.ReactNode }) {
   }, [show, flush]);
 
   return (
-    <NotifyContext.Provider value={{ settings, permission, requestPermission, reloadSettings, consider }}>
+    <NotifyContext.Provider value={{ settings, reloadSettings, consider }}>
       {children}
       <div className="pointer-events-none fixed right-4 top-20 z-[100] flex w-80 flex-col gap-2">
         {toasts.map((t) => (

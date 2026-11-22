@@ -93,8 +93,8 @@ Open http://localhost:3000/dashboard and sign in. Under **Settings**:
 - paste at least one AI key (Groq's free tier works). It is sent to the backend and
   saved in the root `.env`; the dashboard only ever shows it masked.
 - switch the ML or AI engine on or off, and tune the thresholds.
-- choose which attacks raise notifications, and click **Enable browser notifications**
-  so alerts also pop up as Windows notifications when the tab is in the background.
+- choose which attacks raise notifications, and click **Send test notification** to check
+  Windows notifications work.
 
 ### 3. Attack simulator (second PC or terminal)
 
@@ -136,6 +136,25 @@ Pick a scenario (DDoS, PortScan, web attacks, infiltration, or benign-only traff
 
 The dataset's `Label` column is stored only to score accuracy on the dashboard. It
 never decides a verdict.
+
+## Attack notifications
+
+When an attack comes in, the backend shows a **Windows notification** on the PC running
+uvicorn. It works with the browser closed, and clicking it opens Threats & Logs. While the
+dashboard is open, the same alerts also appear as banners on the page.
+
+- One notification per attacked target (IP + port). Further flows are rolled into a
+  "+N more" update at most once per cooldown (default 30 s). A source that probes 3+
+  targets within a minute counts as one port-scan incident.
+- Settings → Attack notifications: switch them off, choose malicious only (default) or
+  malicious + suspicious, set the cooldown, and send a test notification.
+- Needs the backend on Windows 10/11 with `windows-toasts` installed (included in
+  `requirements.txt`, so `start.ps1` installs it). On other systems notifications are
+  silently skipped.
+- Nothing showing? Check Windows Settings → System → Notifications, and that Do Not
+  Disturb / Focus is off. The notifications show under Command Prompt's name, because
+  that's the identity Windows lets an unpackaged Python app use, with "AI Threat
+  Mitigation" as the source line.
 
 ## Training the ML engine
 
@@ -185,6 +204,7 @@ app/                      FastAPI backend
   detection/features.py   CIC-IDS record -> feature vector
   store.py                SQLite (threats.db): flows, feedback, allowlist, settings
   auth.py                 Clerk token check for endpoints that change things
+  winnotify.py            Windows notifications for incoming attacks
   train.py                training script
   models/ml_bundle.joblib trained models
 data/                     attack_simulator.py and the four simulation CSVs

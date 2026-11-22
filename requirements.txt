@@ -10,6 +10,9 @@ httpx>=0.27
 python-dotenv>=1.0
 PyJWT[crypto]>=2.8
 
+# Windows notifications for attacks (only installed on Windows)
+windows-toasts>=1.3; sys_platform == "win32"
+
 # Attack simulator
 requests>=2.31
 

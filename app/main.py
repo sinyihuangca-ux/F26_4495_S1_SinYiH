@@ -26,6 +26,7 @@ from app.detection.ai import (ProviderError, advisor_prompt, ai_client, ai_revie
 from app.detection.features import ID_COLUMNS, _num, flow_meta, normalise_record
 from app.detection.ml import ml_engine, ml_verdict
 from app.detection.verdict import combine
+from app.winnotify import windows_notifier
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("api")
@@ -73,6 +74,8 @@ async def apply_ai_result(flow_id: int, result: dict) -> None:
     store.update_flow(flow_id, **result, final_verdict=final, agreement=agreement)
     updated = store.get_flow(flow_id)
     await manager.broadcast({"type": "FLOW_UPDATED", "flow": updated})
+    # An AI review can escalate a flow (e.g. ML benign -> suspicious).
+    windows_notifier.consider(updated, settings, previous_verdict=flow["final_verdict"])
 
 
 @asynccontextmanager
@@ -113,7 +116,8 @@ def health():
                "classifier": bool(ml_engine.ready and ml_engine.bundle.get("classifier"))},
         "ai": {"enabled": settings["ai_enabled"], "backlog": ai_reviewer.backlog,
                "providers": ai_client.status(settings["provider_order"])},
-        "notifications": {k: settings[k] for k in ("notify_enabled", "notify_min_verdict", "notify_cooldown")},
+        "notifications": {k: settings[k] for k in ("notify_enabled", "notify_min_verdict", "notify_cooldown")}
+                         | {"windows": windows_notifier.available},
         "dashboards_connected": len(manager.clients),
     }
 
@@ -180,7 +184,10 @@ async def ingest(logs: list[dict[str, Any]] = Body(...)):
             queued += 1
         counts[final] += 1
         if final != "benign" or send_to_ai:
-            await manager.broadcast({"type": "FLOW", "flow": store.get_flow(flow_id)})
+            stored = store.get_flow(flow_id)
+            await manager.broadcast({"type": "FLOW", "flow": stored})
+            if final != "benign":
+                windows_notifier.consider(stored, settings)
 
     await manager.broadcast({"type": "STATS", "stats": store.stats()})
     return {
@@ -191,6 +198,16 @@ async def ingest(logs: list[dict[str, Any]] = Body(...)):
         "queued_for_ai": queued,
         "engines": {"ml": use_ml, "ai": use_ai},
     }
+
+
+@app.post("/api/notifications/test")
+def test_notification(user=Depends(require_user)):
+    """Shows a test Windows notification on the PC running the backend."""
+    if not windows_notifier.test():
+        raise HTTPException(503, "Windows notifications aren't available on this machine: the backend "
+                                 "must run on Windows with the windows-toasts package installed "
+                                 "(python -m pip install -r requirements.txt).")
+    return {"status": "sent"}
 
 
 # ---------- flows / alerts ----------
