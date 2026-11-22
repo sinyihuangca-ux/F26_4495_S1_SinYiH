@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS flows (
     features      TEXT NOT NULL,       -- JSON of the model features, kept for AI review and retraining
     ground_truth  TEXT,                -- dataset label; used only to score accuracy
     ml_verdict    TEXT,                -- benign | suspicious | malicious | NULL (engine off)
-    ml_score      REAL,
+    ml_score      REAL,                -- higher of anomaly score and classifier attack probability
+    ml_anomaly    REAL,
+    ml_attack_type TEXT,               -- classifier's best guess (DDoS, DoS Hulk, PortScan, ...)
+    ml_attack_prob REAL,
     ai_status     TEXT NOT NULL DEFAULT 'skipped',   -- skipped | pending | done | failed
     ai_verdict    TEXT,
     ai_attack_type TEXT,
@@ -62,7 +65,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 FLOW_COLUMNS = [
     "id", "received_at", "flow_time", "src_ip", "dst_ip", "dst_port", "protocol",
-    "ground_truth", "ml_verdict", "ml_score", "ai_status", "ai_verdict", "ai_attack_type",
+    "ground_truth", "ml_verdict", "ml_score", "ml_anomaly", "ml_attack_type", "ml_attack_prob", "ai_status", "ai_verdict", "ai_attack_type",
     "ai_confidence", "ai_reason", "ai_provider", "final_verdict", "agreement", "feedback",
 ]
 
@@ -83,6 +86,12 @@ def _db() -> sqlite3.Connection:
 
 
 _db().executescript(SCHEMA)
+# Databases created before the attack classifier existed lack its columns.
+_have = {r["name"] for r in _db().execute("PRAGMA table_info(flows)")}
+for _col, _type in (("ml_anomaly", "REAL"), ("ml_attack_type", "TEXT"), ("ml_attack_prob", "REAL")):
+    if _col not in _have:
+        _db().execute(f"ALTER TABLE flows ADD COLUMN {_col} {_type}")
+_db().commit()
 
 
 def _row(r: sqlite3.Row) -> dict:
@@ -95,12 +104,14 @@ def insert_flow(flow: dict) -> int:
     with _lock:
         cur = _db().execute(
             """INSERT INTO flows (received_at, flow_time, src_ip, dst_ip, dst_port, protocol, features,
-                   ground_truth, ml_verdict, ml_score, ai_status, ai_reason, final_verdict, agreement)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   ground_truth, ml_verdict, ml_score, ml_anomaly, ml_attack_type, ml_attack_prob,
+                   ai_status, ai_reason, final_verdict, agreement)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 time.time(), flow.get("flow_time"), flow.get("src_ip"), flow.get("dst_ip"),
                 flow.get("dst_port"), flow.get("protocol"), json.dumps(flow["features"]),
                 flow.get("ground_truth"), flow.get("ml_verdict"), flow.get("ml_score"),
+                flow.get("ml_anomaly"), flow.get("ml_attack_type"), flow.get("ml_attack_prob"),
                 flow.get("ai_status", "skipped"), flow.get("ai_reason"), flow["final_verdict"],
                 flow.get("agreement"),
             ),
@@ -140,8 +151,8 @@ def list_flows(limit: int = 200, verdict: Optional[str] = None, alerts_only: boo
     if search:
         like = f"%{search}%"
         q += (" AND (src_ip LIKE ? OR dst_ip LIKE ? OR CAST(dst_port AS TEXT) LIKE ?"
-              " OR ai_attack_type LIKE ? OR ground_truth LIKE ?)")
-        args += [like] * 5
+              " OR ai_attack_type LIKE ? OR ml_attack_type LIKE ? OR ground_truth LIKE ?)")
+        args += [like] * 6
     q += " ORDER BY id DESC LIMIT ?"
     args.append(limit)
     return [_row(r) for r in _db().execute(q, args).fetchall()]
@@ -223,7 +234,7 @@ def stats() -> dict:
     by_final = {r[0]: r[1] for r in c.execute(
         "SELECT final_verdict, COUNT(*) FROM flows GROUP BY final_verdict")}
     by_type = {r[0]: r[1] for r in c.execute(
-        """SELECT COALESCE(ai_attack_type, CASE WHEN final_verdict='malicious' THEN 'Anomalous traffic'
+        """SELECT COALESCE(ai_attack_type, ml_attack_type, CASE WHEN final_verdict='malicious' THEN 'Anomalous traffic'
                   ELSE 'Suspicious traffic' END), COUNT(*)
            FROM flows WHERE final_verdict != 'benign' GROUP BY 1""")}
     ai_status = {r[0]: r[1] for r in c.execute("SELECT ai_status, COUNT(*) FROM flows GROUP BY 1")}

@@ -109,7 +109,8 @@ def health():
     settings = store.get_settings()
     return {
         "ml": {"enabled": settings["ml_enabled"], "model_loaded": ml_engine.ready,
-               "trained_on": ml_engine.bundle["meta"] if ml_engine.ready else None},
+               "trained_on": ml_engine.bundle["meta"] if ml_engine.ready else None,
+               "classifier": bool(ml_engine.ready and ml_engine.bundle.get("classifier"))},
         "ai": {"enabled": settings["ai_enabled"], "backlog": ai_reviewer.backlog,
                "providers": ai_client.status(settings["provider_order"])},
         "notifications": {k: settings[k] for k in ("notify_enabled", "notify_min_verdict", "notify_cooldown")},
@@ -144,11 +145,12 @@ async def ingest(logs: list[dict[str, Any]] = Body(...)):
     use_ai = settings["ai_enabled"] and has_key
     skip_reason = (None if use_ai else "AI engine is off" if not settings["ai_enabled"]
                    else "no AI key configured")
-    scores = ml_engine.score(rows) if use_ml else [None] * len(rows)
+    analyses = ml_engine.analyse(rows) if use_ml else [None] * len(rows)
 
     counts = {"benign": 0, "suspicious": 0, "malicious": 0}
     queued = 0
-    for row, score in zip(rows, scores):
+    for row, ml in zip(rows, analyses):
+        score = ml["score"] if ml else None
         meta = flow_meta(row)
         label = row.get("Label")
         features = {k: _num(v) for k, v in row.items() if k not in ID_COLUMNS}
@@ -165,6 +167,9 @@ async def ingest(logs: list[dict[str, Any]] = Body(...)):
             **meta, "features": features,
             "ground_truth": str(label).strip().upper() if label is not None else None,
             "ml_verdict": mv, "ml_score": score,
+            "ml_anomaly": ml["anomaly"] if ml else None,
+            "ml_attack_type": ml["attack_type"] if ml else None,
+            "ml_attack_prob": ml["attack_prob"] if ml else None,
             "ai_status": "pending" if send_to_ai else "skipped",
             "ai_reason": skip_reason or (None if send_to_ai else
                                          "allowlisted" if allowed else "not in the AI sample"),
@@ -364,6 +369,7 @@ def incident_view(inc: dict, cached: Optional[dict], fresh: bool) -> dict:
                                       "top_targets", "distinct_dst_ports")}
                  | {"ml_score_median": ev["ml"]["score_median"], "ml_score_min": ev["ml"]["score_min"],
                     "ml_score_max": ev["ml"]["score_max"], "ml_verdicts": ev["ml"]["verdicts"],
+                    "ml_attack_types": ev["ml"]["classifier_attack_types"],
                     "final_verdicts": ev["final_verdicts"], "per_flow_ai": ev["per_flow_ai"]},
         "brief": cached["brief"] if cached else None,
         "provider": cached["provider"] if cached else None,

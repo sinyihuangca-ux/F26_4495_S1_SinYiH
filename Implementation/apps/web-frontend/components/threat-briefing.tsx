@@ -33,6 +33,7 @@ interface Incident {
     ml_score_min: number | null;
     ml_score_max: number | null;
     ml_verdicts: Record<string, number>;
+    ml_attack_types?: Record<string, number>;
     final_verdicts: Record<string, number>;
     per_flow_ai: { reviewed: number; verdicts: Record<string, number>; attack_types_named: Record<string, number> };
   };
@@ -86,6 +87,7 @@ function MlColumn({ inc }: { inc: Incident }) {
   const s = inc.stats;
   const v = s.ml_verdicts ?? {};
   const named = Object.entries(s.per_flow_ai?.attack_types_named ?? {}).sort((a, b) => b[1] - a[1]);
+  const classified = Object.entries(s.ml_attack_types ?? {}).sort((a, b) => b[1] - a[1]);
   const range = s.ml_score_min != null && s.ml_score_max != null
     ? `${s.ml_score_min.toFixed(2)}–${s.ml_score_max.toFixed(2)}` : "—";
   return (
@@ -97,6 +99,9 @@ function MlColumn({ inc }: { inc: Incident }) {
         <Stat label="Flagged flows" value={inc.flow_count} />
         <Stat label="Malicious / suspicious" value={(v.malicious ?? 0) + (v.suspicious ?? 0) > 0
           ? `${v.malicious ?? 0} / ${v.suspicious ?? 0}` : "none (flagged by per-flow AI)"} />
+        {classified.length > 0 && (
+          <Stat label="Classifier says" value={classified.slice(0, 2).map(([t, n]) => `${t} (${n})`).join(", ")} />
+        )}
         <Stat label="Score (median, range)" value={`${s.ml_score_median?.toFixed(2) ?? "—"} (${range})`} />
         <Stat label="Rate" value={s.flows_per_s ? `${s.flows_per_s} flows/s over ${Math.round(s.time_span_s)}s` : "single burst"} />
         <Stat label={inc.kind === "scan" ? "Ports touched" : "Sources"}
