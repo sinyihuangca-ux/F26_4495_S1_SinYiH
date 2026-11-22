@@ -71,8 +71,10 @@ RETIRED_MODELS = {
 
 # Clerk: set one of these so the backend can verify dashboard users.
 CLERK_JWKS_URL = os.getenv("CLERK_JWKS_URL", "")
-CLERK_PUBLISHABLE_KEY = os.getenv("CLERK_PUBLISHABLE_KEY", "") or os.getenv(
-    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", ""
+# Clerk: the root .env is shared with the dashboard, so this is the same
+# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY it uses (CLERK_PUBLISHABLE_KEY is the older name).
+CLERK_PUBLISHABLE_KEY = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "") or os.getenv(
+    "CLERK_PUBLISHABLE_KEY", ""
 )
 
 CORS_ORIGINS = [

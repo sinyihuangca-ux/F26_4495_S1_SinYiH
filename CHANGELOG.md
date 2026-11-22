@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.7.0 - 2026-11-22
+
+### All keys in one root `.env`
+- The dashboard now reads the project-root `.env` (`next.config.ts` loads it at startup),
+  so the Clerk keys sit next to the AI keys in one file. Values there take priority over
+  any old `web-frontend/.env.local`, which is no longer needed. Tested in production
+  and dev mode: the server and the sign-in check get `CLERK_SECRET_KEY`, and the
+  publishable key is built into the pages.
+- One name for the publishable key, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, used by both
+  the dashboard and the backend's sign-in check. The older `CLERK_PUBLISHABLE_KEY` still
+  works.
+- `start.ps1`: creates a single root `.env` template (Clerk, backend address, CORS, AI
+  keys) and no `.env.local`. On first run it moves real Clerk keys from an old
+  `web-frontend/.env.local` into the root `.env` (placeholders are skipped, existing
+  values are never overwritten), then stops with a clear message if the publishable key
+  is still missing. Files are written without a BOM so both Python and Node parse line 1.
+- README: a new **Keys** section with the full `.env` layout.
+
 ## 2.6.0 - 2026-11-21 (branch `feature/windows-notifications`)
 
 - **Real Windows notifications from the backend** (`app/winnotify.py`, using the

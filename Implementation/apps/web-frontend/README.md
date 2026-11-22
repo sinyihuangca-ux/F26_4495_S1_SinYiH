@@ -4,7 +4,7 @@ The Next.js 16 dashboard for the threat platform. Setup and usage are in the
 [project README](../../../README.md).
 
 ```powershell
-copy .env.example .env.local   # Clerk keys
+# keys: in the .env in the project root (see the main README)
 npm install
 npm run dev                    # http://localhost:3000/dashboard
 ```

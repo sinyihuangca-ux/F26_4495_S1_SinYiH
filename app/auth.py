@@ -3,7 +3,7 @@
 The dashboard sends the signed-in user's Clerk session token as
 `Authorization: Bearer <token>`; it is verified against Clerk's public keys.
 
-If Clerk isn't configured on the backend (no CLERK_PUBLISHABLE_KEY or CLERK_JWKS_URL
+If Clerk isn't configured on the backend (no NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY or CLERK_JWKS_URL
 in .env), those endpoints only accept requests from this machine, so someone else on
 the network can't change your keys.
 """
@@ -44,7 +44,7 @@ def require_user(request: Request) -> dict:
         if host in LOCAL_HOSTS:
             return {"sub": "local"}
         raise HTTPException(403, "Clerk is not configured on the backend; settings can only be "
-                                 "changed from this machine. Add CLERK_PUBLISHABLE_KEY to .env.")
+                                 "changed from this machine. Add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY to the root .env.")
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer "):
         raise HTTPException(401, "Sign in to change settings.")

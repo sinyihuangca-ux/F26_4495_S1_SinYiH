@@ -55,13 +55,12 @@ New-NetFirewallRule -DisplayName "Threat platform 8000" -Direction Inbound -Prot
 ```
 
 The first run creates `.venv`, installs the Python and npm packages, trains the model
-if it's missing, and creates `.env` / `.env.local` from the examples. Later runs skip
+if it's missing, and creates the root `.env` (all keys live there). Later runs skip
 whatever is already in place. The backend and dashboard each open in their own
 window; close them to stop. If Windows blocks the script, run
 `powershell -ExecutionPolicy Bypass -File .\start.ps1`.
 
-You still need to put your Clerk keys in `Implementation/apps/web-frontend/.env.local`
-(and `CLERK_PUBLISHABLE_KEY` in the root `.env`) once.
+You still need to put your Clerk keys in the root `.env` once (see **Keys** below).
 
 ### Step by step
 
@@ -73,7 +72,7 @@ All commands start from the project root.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-# create .env with CLERK_PUBLISHABLE_KEY=<your pk_test_ key> (start.ps1 makes a blank one)
+# create .env in the project root with your Clerk keys (see Keys below; start.ps1 makes a blank one)
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -83,7 +82,7 @@ Check http://localhost:8000/api/health. `model_loaded` should be `true`.
 
 ```powershell
 cd Implementation/apps/web-frontend
-# create .env.local with your Clerk keys (start.ps1 makes a blank one)
+# (no .env.local needed: the dashboard reads the root .env)
 npm install
 npm run dev
 ```
@@ -136,6 +135,32 @@ Pick a scenario (DDoS, PortScan, web attacks, infiltration, or benign-only traff
 
 The dataset's `Label` column is stored only to score accuracy on the dashboard. It
 never decides a verdict.
+
+## Keys
+
+Every key lives in **one file: `.env` in the project root** (next to `app/` and
+`start.ps1`). The backend reads it directly; the dashboard reads it through
+`next.config.ts`. It's git-ignored, so never commit it.
+
+```dotenv
+# Clerk sign-in: https://dashboard.clerk.com -> API keys
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_API_URL=localhost:8000
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+# AI keys: entered on the dashboard's Settings page, which writes them here
+GEMINI_API_KEY=
+GROQ_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+```
+
+`start.ps1` creates this file with blank values on the first run. If you still have the
+old `Implementation/apps/web-frontend/.env.local`, it moves the Clerk keys from there
+into the root `.env` once; after that `.env.local` is ignored and can be deleted. After
+changing the Clerk keys, restart the dashboard.
 
 ## Attack notifications
 
@@ -233,17 +258,17 @@ Interactive docs: http://localhost:8000/docs
 ## Security notes
 
 - Endpoints that change settings, feedback or data need a signed-in Clerk user. The
-  backend checks the token when `CLERK_PUBLISHABLE_KEY` is set in the root `.env`.
+  backend checks the token when `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is set in the root `.env`.
   Without it, they only accept requests from the machine running the backend.
 - `/api/logs/ingest` is open on purpose so the simulator on another PC can post to it.
   Run the backend on a trusted network.
-- `.env`, `.env.local` and `threats.db` are git-ignored. Never commit them.
+- `.env` and `threats.db` are git-ignored. Never commit them.
 
 ## Troubleshooting
 
 - **`ModuleNotFoundError: No module named 'app'`.** Run uvicorn from the project root, not from inside `app/`.
 - **WebSocket 404, or "No supported WebSocket library detected".** Run `python -m pip install "uvicorn[standard]"`.
 - **The dashboard says "Disconnected".** Check uvicorn is running, then check the address under Settings → Backend server. From another PC, the backend must be started with `--host 0.0.0.0` and that PC's origin added to `CORS_ORIGINS` in `.env`.
-- **Settings says "Clerk is not configured on the backend".** Add `CLERK_PUBLISHABLE_KEY` to the root `.env` and restart uvicorn, or open the dashboard on the backend machine.
+- **Settings says "Clerk is not configured on the backend".** Add `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to the root `.env` and restart uvicorn, or open the dashboard on the backend machine.
 - **AI column says "unavailable".** Hover it to see why. Usually the key is wrong or the provider is rate-limiting; `/api/health` shows each provider's status.
 - **`InconsistentVersionWarning` when loading the model.** Your scikit-learn version differs from the one used for training. Run `python -m app.train` to retrain.
