@@ -7,8 +7,8 @@
   .\start.ps1 -Simulate    # also opens the attack simulator, pointed at this PC
   .\start.ps1 -NoBrowser   # don't open the browser
 
-  The first run creates .venv, installs Python and npm packages and trains the model if
-  it's missing. Later runs skip whatever is already in place, so they start quickly.
+  The first run creates .venv, installs Python and npm packages, trains the model if
+  it's missing, and creates the root .env (all keys live there). Later runs skip whatever is already in place, so they start quickly.
   Each part runs in its own window; close the window or press Ctrl+C there to stop it.
 
   If Windows blocks the script:  powershell -ExecutionPolicy Bypass -File .\start.ps1
@@ -58,24 +58,74 @@ if (-not (Test-Path (Join-Path $Root "app\models\ml_bundle.joblib"))) {
     finally { Pop-Location }
 }
 
-# Create a missing env file from its .env.example, or from a built-in blank template
-# when the example isn't there.
-function New-EnvFile($target, $example, $template) {
-    if (Test-Path $example) { Copy-Item $example $target }
-    else { Set-Content -Path $target -Value $template -Encoding UTF8 }
+# ---------- Keys: one .env in the project root ----------
+# The backend and the dashboard both read the root .env (the dashboard via
+# next.config.ts). It holds the Clerk keys and the AI keys; git ignores it.
+$RootEnv = Join-Path $Root ".env"
+$OldEnv = Join-Path $Web ".env.local"   # where the Clerk keys used to live
+$Utf8 = New-Object System.Text.UTF8Encoding $false   # no BOM, so every reader parses line 1
+
+function Get-EnvValue($file, $key) {
+    if (-not (Test-Path $file)) { return "" }
+    $m = Select-String -Path $file -Pattern "^$key=(.*)$" | Select-Object -First 1
+    if ($m) { return $m.Matches[0].Groups[1].Value.Trim().Trim('"') } else { return "" }
 }
 
-if (-not (Test-Path (Join-Path $Root ".env"))) {
-    New-EnvFile (Join-Path $Root ".env") (Join-Path $Root ".env.example") @"
-# Backend settings. AI keys are written here from the dashboard's Settings page.
-CLERK_PUBLISHABLE_KEY=
+function Set-EnvValue($file, $key, $value) {
+    $found = $false
+    $lines = @(Get-Content $file | ForEach-Object {
+        if ($_ -match "^$key=") { $found = $true; "$key=$value" } else { $_ }
+    })
+    if (-not $found) { $lines += "$key=$value" }
+    [System.IO.File]::WriteAllLines($file, [string[]]$lines, $Utf8)
+}
+
+if (-not (Test-Path $RootEnv)) {
+    $template = @"
+# All keys for the platform (backend + dashboard). Git-ignored: never commit this file.
+# Clerk sign-in keys: https://dashboard.clerk.com -> API keys
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/dashboard
+# Backend address the dashboard uses by default (can be changed per browser in Settings)
+NEXT_PUBLIC_API_URL=localhost:8000
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+# AI providers: managed from the dashboard's Settings page
 GEMINI_API_KEY=
 GROQ_API_KEY=
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 "@
-    Warn "Created .env. Add CLERK_PUBLISHABLE_KEY to it so settings can be changed from other PCs."
+    [System.IO.File]::WriteAllText($RootEnv, $template, $Utf8)
+    Step "Created .env in the project root."
+}
+
+# One-time move: copy real keys from the old web-frontend\.env.local into the root .env.
+if (Test-Path $OldEnv) {
+    $moved = @()
+    foreach ($key in "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY",
+                     "NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL",
+                     "NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL", "NEXT_PUBLIC_API_URL") {
+        $old = Get-EnvValue $OldEnv $key
+        if ($old -and $old -notmatch '\.\.\.' -and -not (Get-EnvValue $RootEnv $key)) {
+            Set-EnvValue $RootEnv $key $old
+            $moved += $key
+        }
+    }
+    if ($moved.Count) { Step "Moved $($moved -join ', ') from web-frontend\.env.local into the root .env." }
+    Warn "web-frontend\.env.local is no longer used (keys now live in the root .env). You can delete it."
+}
+
+$pk = Get-EnvValue $RootEnv "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
+if (-not $pk) { $pk = Get-EnvValue $RootEnv "CLERK_PUBLISHABLE_KEY" }   # older name
+if (-not $pk -or $pk -notmatch '^pk_(test|live)_\S{20,}') {
+    Warn "No real Clerk publishable key in the root .env (found '$pk')."
+    Warn "Open $RootEnv and fill in NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY (pk_test_...) and CLERK_SECRET_KEY (sk_test_...), then run this again."
+    exit 1
+}
+if (-not (Get-EnvValue $RootEnv "CLERK_SECRET_KEY")) {
+    Warn "CLERK_SECRET_KEY is empty in the root .env - sign-in will fail until you add it."
 }
 
 # ---------- Next.js dashboard ----------
@@ -85,26 +135,6 @@ if (Outdated (Join-Path $Web "package-lock.json") $NpmMarker) {
     Push-Location $Web
     try { npm install --no-audit --no-fund; if ($LASTEXITCODE) { throw "npm install failed. Is Node.js installed?" } }
     finally { Pop-Location }
-}
-
-if (-not (Test-Path (Join-Path $Web ".env.local"))) {
-    New-EnvFile (Join-Path $Web ".env.local") (Join-Path $Web ".env.example") @"
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/dashboard
-NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/dashboard
-NEXT_PUBLIC_API_URL=localhost:8000
-"@
-    Warn "Created web-frontend\.env.local - fill in your Clerk keys, or sign-in won't work."
-}
-
-$EnvLocal = Join-Path $Web ".env.local"
-$pkLine = Select-String -Path $EnvLocal -Pattern '^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=(.*)$' | Select-Object -First 1
-$pk = if ($pkLine) { $pkLine.Matches[0].Groups[1].Value.Trim() } else { "" }
-if (-not $pk -or $pk -notmatch '^pk_(test|live)_\S{20,}') {
-    Warn "No real Clerk publishable key in web-frontend\.env.local (found '$pk')."
-    Warn "Put your pk_test_... and sk_test_... keys there (the dashboard reads only that file), then run this again."
-    exit 1
 }
 
 # ---------- Launch ----------
