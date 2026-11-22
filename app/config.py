@@ -52,7 +52,8 @@ DEFAULT_SETTINGS: dict = {
         "openai": "gpt-4o-mini",
         "claude": "claude-haiku-4-5",
     },
-    # Browser notifications raised by the dashboard (see web-frontend lib/notify.tsx).
+    # Attack notifications: Windows notifications from the backend (app/winnotify.py)
+    # and in-page banners in the dashboard (web-frontend lib/notify.tsx).
     "notify_enabled": True,
     # Lowest final verdict that notifies: "malicious" or "suspicious".
     "notify_min_verdict": "malicious",

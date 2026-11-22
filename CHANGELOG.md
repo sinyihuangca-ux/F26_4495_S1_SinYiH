@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.6.0 - 2026-11-21 (branch `feature/windows-notifications`)
+
+- **Real Windows notifications from the backend** (`app/winnotify.py`, using the
+  `windows-toasts` package). The browser's notifications only worked while a dashboard
+  tab was open; these appear on the PC running uvicorn even with the browser closed.
+  Clicking one opens Threats & Logs in the default browser.
+- They use the same rules as before: one per incident (target IP + port, or one port-scan
+  incident per source), "+N more" roll-ups after the cooldown, the malicious /
+  malicious + suspicious setting, and an AI review that escalates a flow can notify.
+  Notifications for the same incident replace each other in the Action Center.
+  Showing one runs off the event loop and can never break ingestion.
+- The dashboard keeps its in-page banners. Its browser notifications and the "Enable
+  browser notifications" button are removed to avoid duplicates.
+- Settings → Attack notifications shows whether Windows notifications are available and
+  has a **Send test notification** button (`POST /api/notifications/test`, sign-in required).
+  `/api/health` reports `notifications.windows`.
+- `requirements.txt`: `windows-toasts>=1.3` (installed only on Windows).
+- Tests: 32.
+
 ## 2.5.0 - 2026-11-20 (branch `feature/notifications`)
 
 ### ML engine trained on the full CIC-IDS-2017 week
