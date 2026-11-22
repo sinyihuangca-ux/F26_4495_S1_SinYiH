@@ -303,3 +303,24 @@ def test_notification_settings():
         assert ok.status_code == 200
         assert c.get("/api/health").json()["notifications"]["notify_min_verdict"] == "suspicious"
         assert "ntfy_topic" not in ok.json()["secrets"]
+
+
+def test_label_normalisation():
+    from app.detection.features import normalise_label
+    assert normalise_label("Web Attack \ufffd XSS") == "Web Attack - XSS"
+    assert normalise_label("Web Attack \x96 Brute Force") == "Web Attack - Brute Force"
+    assert normalise_label(" benign ") == "BENIGN"
+
+
+def test_ml_analyse_fields_stored():
+    """Works with or without a trained attack classifier in the bundle."""
+    with TestClient(app) as c:
+        c.put("/api/settings", json={"settings": {"ai_enabled": False}})
+        c.post("/api/logs/ingest", json=sample_rows(10))
+    flows = store.list_flows()
+    assert all(f["ml_anomaly"] is not None for f in flows)
+    from app.detection.ml import ml_engine
+    if ml_engine.bundle.get("classifier"):
+        assert any(f["ml_attack_type"] for f in flows if f["ground_truth"] != "BENIGN")
+    else:
+        assert all(f["ml_attack_type"] is None for f in flows)

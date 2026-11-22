@@ -14,6 +14,9 @@ export interface Flow {
   ground_truth: string | null;
   ml_verdict: Verdict | null;
   ml_score: number | null;
+  ml_anomaly: number | null;
+  ml_attack_type: string | null;
+  ml_attack_prob: number | null;
   ai_status: "skipped" | "pending" | "done" | "failed";
   ai_verdict: Verdict | null;
   ai_attack_type: string | null;

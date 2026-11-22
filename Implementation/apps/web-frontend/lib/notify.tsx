@@ -48,7 +48,7 @@ const SCAN_TARGETS = 3;       // distinct targets from one source that make it a
 const SCAN_WINDOW_MS = 60000; // ...within this long
 
 const targetOf = (f: Flow) => `${f.dst_ip ?? "?"}:${f.dst_port ?? "?"}`;
-const attackOf = (f: Flow) => f.ai_attack_type ?? (f.final_verdict === "malicious" ? "Attack" : "Suspicious traffic");
+const attackOf = (f: Flow) => f.ai_attack_type ?? f.ml_attack_type ?? (f.final_verdict === "malicious" ? "Attack" : "Suspicious traffic");
 
 function currentPermission(): NotificationPermission | "unsupported" {
   return typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported";

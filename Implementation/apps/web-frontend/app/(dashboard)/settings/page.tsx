@@ -15,7 +15,12 @@ const PROVIDER_NAMES: Record<string, string> = {
 };
 
 interface Health {
-  ml: { enabled: boolean; model_loaded: boolean; trained_on: { source: string; benign_rows: number } | null };
+  ml: {
+    enabled: boolean;
+    model_loaded: boolean;
+    classifier?: boolean;
+    trained_on: { source: string; benign_rows: number; attack_classes?: string[] } | null;
+  };
   ai: { enabled: boolean; backlog: number; providers: Record<string, string | null> };
 }
 
@@ -213,7 +218,10 @@ export default function SettingsPage() {
             )}
             {health?.ml.trained_on && (
               <p className="text-xs text-slate-500">
-                Trained on {health.ml.trained_on.benign_rows.toLocaleString()} benign flows from {health.ml.trained_on.source}.
+                Anomaly models trained on {health.ml.trained_on.benign_rows.toLocaleString()} normal flows from {health.ml.trained_on.source}.
+                {health.ml.classifier
+                  ? ` Attack classifier knows ${(health.ml.trained_on.attack_classes ?? []).filter((c) => c !== "BENIGN").length} attack types.`
+                  : " No attack classifier yet: add the CIC-IDS-2017 day files to data/ and run python -m app.train."}
               </p>
             )}
             <Slider label="ML score for “suspicious”" value={draft.ml_suspicious_threshold} format={(v) => v.toFixed(2)}

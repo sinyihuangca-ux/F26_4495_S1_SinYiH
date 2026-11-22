@@ -122,6 +122,9 @@ def summarise(key: str, flows: list[dict]) -> dict:
             "score_min": round(min(ml_scores), 2) if ml_scores else None,
             "score_median": _median(ml_scores, 2),
             "score_max": round(max(ml_scores), 2) if ml_scores else None,
+            # The attack classifier's names for these flows (trained on labelled CIC-IDS-2017
+            # attacks); a strong hint, but it only knows attack types it was trained on.
+            "classifier_attack_types": dict(Counter(f["ml_attack_type"] for f in flows if f.get("ml_attack_type"))),
         },
         "per_flow_ai": {
             "reviewed": len(ai_done),

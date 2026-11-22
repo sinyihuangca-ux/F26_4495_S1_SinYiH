@@ -143,15 +143,35 @@ never decides a verdict.
 python -m app.train
 ```
 
-This writes `app/models/ml_bundle.joblib` and prints detection and false-positive
-rates. Restart uvicorn afterwards to load the new model.
+Put the CIC-IDS-2017 day files (`*.pcap_ISCX.csv`, Monday-Friday, ~885 MB) in `data/`
+first. They're git-ignored. Training reads them in 100k-row chunks, takes a few minutes and
+about 1 GB of RAM, and writes `app/models/ml_bundle.joblib` (about 6 MB). Restart
+uvicorn afterwards to load it.
 
-By default it trains on the benign rows of the four `data/mixed_*.csv` files (165
-unique flows). That's enough to work, but the false-positive rate is high. For a much
-better model, download `Monday-WorkingHours.pcap_ISCX.csv` from the
-[CIC-IDS-2017 dataset](https://www.unb.ca/cic/datasets/ids-2017.html), put it in
-`data/`, and run the same command: it uses the Monday file automatically (capped at
-20,000 rows). The file is git-ignored because of its size.
+It trains two things:
+
+- **Anomaly models** (Isolation Forest + One-Class SVM) on normal traffic sampled from
+  all five days. No labels, so they can flag attacks they've never seen.
+- **An attack classifier** on the labelled Tue-Fri attacks (DDoS, DoS Hulk/GoldenEye/
+  slowloris/Slowhttptest, PortScan, FTP/SSH-Patator, Bot, web attacks, Heartbleed).
+  It names known attacks.
+
+A flow's ML score is the higher of the two. The classifier's attack name appears in the
+ML column, the incident cards and the notifications.
+
+The rows the simulator sends (`data/mixed_*.csv`) are excluded from training, so the
+accuracy panel shows performance on flows the models never saw. The dataset's only
+Infiltration and SQL-injection examples are all in those files, so the classifier can't
+learn those two, and the anomaly models catch them instead. Flows you mark as false
+positives are added as extra normal traffic the next time you train.
+
+The script prints a held-out accuracy report per attack type. On the full dataset it
+catches 100% of the simulator's DDoS, PortScan, brute-force and XSS flows, about 89% of
+Infiltration and most SQL injection, and wrongly flags roughly 10-13% of normal flows,
+mostly as "suspicious" (the AI review is there to clear those).
+
+Without the day files it falls back to the benign rows of the four simulation CSVs:
+anomaly models only, with a high false-positive rate.
 
 ## Project layout
 

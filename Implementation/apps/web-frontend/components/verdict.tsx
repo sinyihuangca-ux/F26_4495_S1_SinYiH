@@ -17,9 +17,15 @@ export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
 
 export function MlCell({ flow }: { flow: Flow }) {
   return (
-    <div className="flex items-center gap-2">
-      <VerdictBadge verdict={flow.ml_verdict} />
-      {flow.ml_score != null && <span className="font-mono text-[11px] text-slate-500">{flow.ml_score.toFixed(2)}</span>}
+    <div className="space-y-0.5"
+      title={flow.ml_anomaly != null ? `anomaly ${flow.ml_anomaly.toFixed(2)}${flow.ml_attack_prob != null ? ` · classifier ${flow.ml_attack_prob.toFixed(2)}` : ""}` : ""}>
+      <div className="flex items-center gap-2">
+        <VerdictBadge verdict={flow.ml_verdict} />
+        {flow.ml_score != null && <span className="font-mono text-[11px] text-slate-500">{flow.ml_score.toFixed(2)}</span>}
+      </div>
+      {flow.ml_attack_type && flow.ml_verdict !== "benign" && (
+        <div className="text-[11px] text-slate-400">{flow.ml_attack_type}</div>
+      )}
     </div>
   );
 }

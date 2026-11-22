@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.5.0 - 2026-11-20 (branch `feature/notifications`)
+
+### ML engine trained on the full CIC-IDS-2017 week
+- `python -m app.train` now uses every `data/*.pcap_ISCX.csv` day file (Monday-Friday)
+  instead of only Monday:
+  - anomaly models train on normal traffic sampled from all five days;
+  - **new attack classifier** (HistGradientBoosting) trained on the labelled Tue-Fri
+    attacks: 12 attack types plus normal. It reaches 98.6% accuracy on a held-out 20%.
+  - The ML score is the higher of the anomaly score and the classifier's attack
+    probability, and the classifier's attack name is stored with each flow
+    (`ml_attack_type`, `ml_attack_prob`, `ml_anomaly`; existing databases are migrated).
+- **The simulator's rows are excluded from training** (matched on their measured values),
+  so the accuracy panel shows performance on unseen flows. On those: DDoS, PortScan,
+  web brute force and XSS 100% flagged; Infiltration 89% and SQL injection 76% (no
+  training examples remain for either, so only the anomaly models catch them); about
+  10-13% of normal flows flagged, mostly as suspicious.
+- Labels are normalised ("Web Attack \ufffd XSS" and similar become "Web Attack - XSS").
+- Files are read in 100k-row chunks, keeping only a running sample (25k normal flows per
+  day, at most 30k per attack type, stored as float32). Peak memory is about 1 GB; the
+  first version loaded whole files and ran out of memory on the 692k-row Wednesday file.
+  The run takes a few minutes, and the saved model is about 6 MB.
+- The classifier's attack names appear in the ML column, the incident cards ("Classifier
+  says"), notifications and the AI advisor's evidence. Settings shows whether a classifier
+  is loaded.
+- `.gitignore` now excludes every `data/*.pcap_ISCX.csv`; previously six of the eight day
+  files would have been committed.
+- Tests: 29.
+
 ## 2.4.0 - 2026-11-20 (branch `feature/notification`)
 
 ### Attack notifications from the dashboard

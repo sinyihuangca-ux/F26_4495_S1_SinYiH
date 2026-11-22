@@ -8,6 +8,18 @@ ID_COLUMNS = {
 }
 
 
+def normalise_label(label) -> str:
+    """CIC-IDS labels come in a few spellings: 'Web Attack \x96 XSS' (cp1252 dash),
+    'Web Attack \ufffd XSS' (mangled), 'Web Attack – XSS'. Make them one name."""
+    s = str(label).strip()
+    for bad in ("\ufffd", "\x96", "\u2013", "\u2014", "ï¿½", "Â–"):
+        s = s.replace(bad, "-")
+    s = " ".join(s.split()).replace(" - ", " - ")
+    if s.upper() == "BENIGN":
+        return "BENIGN"
+    return s
+
+
 def clean_key(k: str) -> str:
     """CIC-IDS CSV headers often carry stray spaces (' Destination Port')."""
     return str(k).strip()
