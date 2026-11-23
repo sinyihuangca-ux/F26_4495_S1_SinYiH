@@ -1,3 +1,6 @@
+# Build context: watchers/   (docker build -f watchers/Dockerfile.csv-watcher watchers/)
+#
+# Runs as root so it can move CSVs (created by the root pcap-watcher) into csvs/processed|failed.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

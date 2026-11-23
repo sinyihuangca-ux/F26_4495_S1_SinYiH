@@ -1,5 +1,8 @@
 import logging
 import os
+import queue
+import signal
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -30,6 +33,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("csv-inference-watcher")
 
+stop_event = threading.Event()
+
 
 def unique_destination(directory: Path, name: str) -> Path:
     """Return directory/name, or a timestamped variant if that file already exists."""
@@ -55,7 +60,10 @@ def wait_until_csv_ready(path: Path, checks: int = 3, delay: float = 0.4) -> boo
     for _ in range(60):
         if not path.exists():
             return False
-        size = path.stat().st_size
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            return False
         if size > 0 and size == prev_size:
             stable_count += 1
             if stable_count >= checks:
@@ -146,69 +154,101 @@ def send_csv_to_inference(csv_path: Path, user_id: str, computer_id: str) -> boo
 
 class CsvProcessor:
     def __init__(self) -> None:
+        self.queue: "queue.Queue[Path]" = queue.Queue()
+        self.lock = threading.Lock()
+        # Paths queued or being sent; dedupes events from the observer and the rescan.
         self.in_flight: Set[str] = set()
         # path -> (failed attempts so far, monotonic time before which we do not retry)
         self.failures: Dict[str, Tuple[int, float]] = {}
 
     def _record_failure(self, csv_path: Path, key: str, reason: str) -> None:
-        attempts = self.failures.get(key, (0, 0.0))[0] + 1
-        if attempts >= MAX_SEND_ATTEMPTS:
-            self.failures.pop(key, None)
+        with self.lock:
+            attempts = self.failures.get(key, (0, 0.0))[0] + 1
+            give_up = attempts >= MAX_SEND_ATTEMPTS
+            delay = min(RETRY_BASE_DELAY * (2 ** (attempts - 1)), RETRY_MAX_DELAY)
+            if give_up:
+                self.failures.pop(key, None)
+            else:
+                self.failures[key] = (attempts, time.monotonic() + delay)
+        if give_up:
             try:
                 dest = move_into(csv_path, FAILED_DIR_NAME)
                 log.error("Giving up on %s after %s attempts (%s); moved to %s", csv_path, attempts, reason, dest)
             except FileNotFoundError:
                 pass
             return
-        delay = min(RETRY_BASE_DELAY * (2 ** (attempts - 1)), RETRY_MAX_DELAY)
-        self.failures[key] = (attempts, time.monotonic() + delay)
         log.warning(
             "%s for %s (attempt %s/%s); retrying in %.0fs", reason, csv_path, attempts, MAX_SEND_ATTEMPTS, delay
         )
 
-    def handle_file(self, raw_path: Path) -> None:
-        csv_path = raw_path.resolve()
+    def submit(self, raw_path: Path) -> None:
+        """Called from the observer thread and the rescan loop; only the worker thread sends."""
+        try:
+            csv_path = raw_path.resolve()
+        except OSError:
+            return
+        if parse_csv_path(csv_path) is None:
+            return
         key = str(csv_path)
-        if key in self.in_flight or not csv_path.exists():
-            return
-        if time.monotonic() < self.failures.get(key, (0, 0.0))[1]:
-            return
+        with self.lock:
+            if key in self.in_flight:
+                return
+            if time.monotonic() < self.failures.get(key, (0, 0.0))[1]:
+                return
+            self.in_flight.add(key)
+        self.queue.put(csv_path)
 
+    def worker_loop(self) -> None:
+        while not stop_event.is_set():
+            try:
+                csv_path = self.queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            try:
+                self.handle_file(csv_path)
+            except Exception:
+                log.exception("Unexpected error while processing %s", csv_path)
+            finally:
+                with self.lock:
+                    self.in_flight.discard(str(csv_path))
+                self.queue.task_done()
+
+    def handle_file(self, csv_path: Path) -> None:
+        key = str(csv_path)
+        if stop_event.is_set() or not csv_path.exists():
+            return
         parsed = parse_csv_path(csv_path)
         if not parsed:
             return
 
         user_id, computer_id = parsed
-        self.in_flight.add(key)
+        # pcap-watcher moves finished CSVs in atomically; this is a safety net for CSVs
+        # copied into csvs/ by other means.
+        if not wait_until_csv_ready(csv_path):
+            if csv_path.exists():
+                self._record_failure(csv_path, key, "CSV empty or still changing")
+            return
+
+        log.info("Sending CSV to inference engine: user=%s comp=%s file=%s", user_id, computer_id, csv_path.name)
         try:
-            # pcap-watcher moves finished CSVs in atomically; this is a safety net for CSVs
-            # copied into csvs/ by other means.
-            if not wait_until_csv_ready(csv_path):
-                if csv_path.exists():
-                    self._record_failure(csv_path, key, "CSV empty or still changing")
-                return
+            ok = send_csv_to_inference(csv_path, user_id, computer_id)
+        except FileNotFoundError:
+            return  # removed while we were working on it
+        if not ok:
+            self._record_failure(csv_path, key, "Inference request failed")
+            return
 
-            log.info("Sending CSV to inference engine: user=%s comp=%s file=%s", user_id, computer_id, csv_path.name)
-            try:
-                ok = send_csv_to_inference(csv_path, user_id, computer_id)
-            except FileNotFoundError:
-                return  # removed while we were working on it
-            if not ok:
-                self._record_failure(csv_path, key, "Inference request failed")
-                return
-
+        with self.lock:
             self.failures.pop(key, None)
-            try:
-                if DELETE_AFTER_SEND:
-                    csv_path.unlink()
-                    log.info("Deleted sent CSV %s", csv_path)
-                else:
-                    dest = move_into(csv_path, PROCESSED_DIR_NAME)
-                    log.info("Archived sent CSV to %s", dest)
-            except FileNotFoundError:
-                pass
-        finally:
-            self.in_flight.discard(key)
+        try:
+            if DELETE_AFTER_SEND:
+                csv_path.unlink()
+                log.info("Deleted sent CSV %s", csv_path)
+            else:
+                dest = move_into(csv_path, PROCESSED_DIR_NAME)
+                log.info("Archived sent CSV to %s", dest)
+        except FileNotFoundError:
+            pass
 
 
 class CsvEventHandler(FileSystemEventHandler):
@@ -217,37 +257,56 @@ class CsvEventHandler(FileSystemEventHandler):
 
     def on_created(self, event) -> None:
         if not event.is_directory:
-            self.processor.handle_file(Path(event.src_path))
+            self.processor.submit(Path(event.src_path))
 
     def on_moved(self, event) -> None:
         if not event.is_directory:
-            self.processor.handle_file(Path(event.dest_path))
+            self.processor.submit(Path(event.dest_path))
 
 
 def scan_existing(processor: CsvProcessor) -> None:
     for csv_file in USERS_ROOT.glob("*/comp/*/csvs/*.csv"):
-        processor.handle_file(csv_file)
+        processor.submit(csv_file)
+
+
+def _handle_stop_signal(signum, _frame) -> None:
+    log.info("Received signal %s, finishing current send and stopping...", signum)
+    stop_event.set()
 
 
 def main() -> None:
+    signal.signal(signal.SIGTERM, _handle_stop_signal)
+    signal.signal(signal.SIGINT, _handle_stop_signal)
+
     USERS_ROOT.mkdir(parents=True, exist_ok=True)
     processor = CsvProcessor()
-    scan_existing(processor)
+    worker = threading.Thread(target=processor.worker_loop, name="sender", daemon=True)
+    worker.start()
 
     observer = Observer()
     observer.schedule(CsvEventHandler(processor), str(USERS_ROOT), recursive=True)
     observer.start()
     log.info("Watching CSVs under %s -> %s", USERS_ROOT, INFERENCE_URL)
 
+    exit_code = 0
     try:
-        while True:
-            time.sleep(POLL_INTERVAL)
-            scan_existing(processor)
-    except KeyboardInterrupt:
-        log.info("Stopping CSV inference watcher...")
+        while not stop_event.is_set():
+            try:
+                scan_existing(processor)
+            except OSError:
+                log.exception("Rescan failed")
+            if not observer.is_alive():
+                log.error("File observer died; exiting so the container restarts")
+                exit_code = 1
+                break
+            stop_event.wait(POLL_INTERVAL)
     finally:
+        stop_event.set()
         observer.stop()
-        observer.join()
+        observer.join(timeout=10)
+        worker.join(timeout=INFERENCE_TIMEOUT + 10)
+        log.info("CSV inference watcher stopped.")
+    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":

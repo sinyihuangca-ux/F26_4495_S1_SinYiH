@@ -1,0 +1,61 @@
+# PCAP -> flow CSV -> ML inference pipeline.
+#
+#   docker compose --profile build build     # builds cicflowmeter-worker:latest + both watchers
+#   docker compose up -d                     # starts pcap-watcher and csv-inference-watcher
+#
+# cicflowmeter-worker is never left running: pcap-watcher starts one short-lived container
+# per pcap through the host docker socket, so the image must exist on the same host daemon.
+#
+# Settings (shell env or a .env file next to this file):
+#   USERS_ROOT     host directory with <user_id>/comp/<computer_id>/{pcaps,csvs}  (default /srv/app/users)
+#   INFERENCE_URL  ML inference endpoint (default: port 8000 on the docker host)
+name: pcap-pipeline
+
+services:
+  cicflowmeter-worker:
+    build: ./cicflowmeter
+    image: cicflowmeter-worker:latest
+    platform: linux/amd64
+    profiles: ["build"]
+
+  pcap-watcher:
+    build:
+      context: ./watchers
+      dockerfile: Dockerfile.pcap-watcher
+    image: pcap-watcher:latest
+    init: true
+    restart: unless-stopped
+    # Give an in-progress conversion time to finish on `docker compose stop`.
+    stop_grace_period: 2m
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mounted at the same path as on the host so container and host paths match.
+      - ${USERS_ROOT:-/srv/app/users}:/srv/app/users
+    environment:
+      USERS_ROOT: /srv/app/users
+      HOST_USERS_ROOT: ${USERS_ROOT:-/srv/app/users}
+      CICFLOWMETER_IMAGE: cicflowmeter-worker:latest
+      PCAP_WORKERS: ${PCAP_WORKERS:-1}
+      WORKER_TIMEOUT: ${WORKER_TIMEOUT:-1800}
+      WORKER_MEMORY: ${WORKER_MEMORY:-2g}
+      WORKER_CPUS: ${WORKER_CPUS:-1}
+      WORKER_USER: ${WORKER_USER:-}
+
+  csv-inference-watcher:
+    build:
+      context: ./watchers
+      dockerfile: Dockerfile.csv-watcher
+    image: csv-inference-watcher:latest
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    volumes:
+      - ${USERS_ROOT:-/srv/app/users}:/srv/app/users
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      USERS_ROOT: /srv/app/users
+      INFERENCE_URL: ${INFERENCE_URL:-http://host.docker.internal:8000/predict}
+      INFERENCE_TIMEOUT: ${INFERENCE_TIMEOUT:-120}
+      DELETE_AFTER_SEND: ${DELETE_AFTER_SEND:-false}
+      MAX_SEND_ATTEMPTS: ${MAX_SEND_ATTEMPTS:-8}
