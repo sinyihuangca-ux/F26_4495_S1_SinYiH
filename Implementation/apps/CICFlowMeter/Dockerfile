@@ -1,3 +1,7 @@
+# cicflowmeter-worker: short-lived container started by pcap-watcher.
+#   docker run ... cicflowmeter-worker:latest <pcap file> <output dir>
+# Writes <output dir>/<pcap file name>_Flow.csv; exits non-zero on failure.
+
 # --- Stage 1: Build CICFlowMeter with Java 8 ---
 FROM ubuntu:22.04 AS builder
 
@@ -14,20 +18,14 @@ COPY . .
 
 # Seed local Maven repository with jnetpcap 1.4.1 so Gradle resolves reliably
 RUN set -eux; \
-    JAR_SRC=""; \
-    for candidate in \
-      "./jnetpcap/linux/jnetpcap-1.4.r1425/jnetpcap.jar" \
-      "./jnetpcap/linux/jnetpcap.jar" \
-      "./jnetpcap/win/jnetpcap-1.4.r1425/jnetpcap.jar" \
-      "./jnetpcap.jar"; do \
-      if [ -f "$candidate" ]; then JAR_SRC="$candidate"; break; fi; \
-    done; \
-    test -n "$JAR_SRC"; \
+    JAR_SRC="./jnetpcap/linux/jnetpcap-1.4.r1425/jnetpcap.jar"; \
+    test -f "$JAR_SRC"; \
     mkdir -p /root/.m2/repository/org/jnetpcap/jnetpcap/1.4.1; \
     cp "$JAR_SRC" /root/.m2/repository/org/jnetpcap/jnetpcap/1.4.1/jnetpcap-1.4.1.jar; \
     printf '<project><modelVersion>4.0.0</modelVersion><groupId>org.jnetpcap</groupId><artifactId>jnetpcap</artifactId><version>1.4.1</version></project>' \
       > /root/.m2/repository/org/jnetpcap/jnetpcap/1.4.1/jnetpcap-1.4.1.pom
 
+# installDist also copies jnetpcap-1.4.r1425/*.so into build/install/CICFlowMeter/lib/native (build.gradle)
 RUN chmod +x ./gradlew && ./gradlew clean installDist --no-daemon
 
 # --- Stage 2: Minimal Ubuntu 22.04 Runtime ---
@@ -36,39 +34,29 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 ENV APP_HOME=/opt/cicflowmeter
-ENV NATIVE_DIR=/opt/cicflowmeter/natives
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-8-jre-headless \
     libpcap0.8 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR ${APP_HOME}
-
 COPY --from=builder /build/build/install/CICFlowMeter/ ${APP_HOME}/
+COPY docker/log4j-console.properties ${APP_HOME}/conf/log4j.properties
 
-RUN mkdir -p ${NATIVE_DIR}
-COPY --from=builder /build/jnetpcap/ /tmp/jnetpcap-src/
+# Fail the build if the jnetpcap native library or its libpcap dependency is missing.
 RUN set -eux; \
-    SO_FILE=$(find /tmp/jnetpcap-src -name "libjnetpcap.so*" -type f | head -n 1 || true); \
-    if [ -n "$SO_FILE" ]; then cp "$SO_FILE" ${NATIVE_DIR}/libjnetpcap.so; fi; \
-    rm -rf /tmp/jnetpcap-src; \
-    chmod +x ${APP_HOME}/bin/*
+    test -f ${APP_HOME}/lib/native/libjnetpcap.so; \
+    ldd ${APP_HOME}/lib/native/libjnetpcap.so; \
+    if ldd ${APP_HOME}/lib/native/libjnetpcap.so | grep -q "not found"; then echo "unresolved native deps" >&2; exit 1; fi; \
+    rm -f ${APP_HOME}/lib/native/*.dll; \
+    chmod +x ${APP_HOME}/bin/cfm
 
-ENV LD_LIBRARY_PATH=${NATIVE_DIR}
-ENV JAVA_OPTS="-Djava.library.path=${NATIVE_DIR}"
+# - absolute java.library.path (the start script's default "../lib/native" depends on the cwd);
+#   JAVA_OPTS comes after DEFAULT_JVM_OPTS in the start script, so it takes precedence
+# - console-only logging so the worker can run with a read-only root filesystem
+# - size the heap from the container memory limit (docker run --memory)
+ENV JAVA_OPTS="-Djava.library.path=/opt/cicflowmeter/lib/native -Dlog4j.configuration=file:/opt/cicflowmeter/conf/log4j.properties -XX:MaxRAMPercentage=75 -Djava.io.tmpdir=/tmp"
 
-RUN set -eux; \
-    if [ -x "${APP_HOME}/bin/cfm" ]; then \
-      ln -sf "${APP_HOME}/bin/cfm" /usr/local/bin/cfm-run; \
-    elif [ -x "${APP_HOME}/bin/CICFlowMeter" ]; then \
-      ln -sf "${APP_HOME}/bin/CICFlowMeter" /usr/local/bin/cfm-run; \
-    else \
-      SCRIPT=$(find "${APP_HOME}/bin" -maxdepth 1 -type f ! -name "*.bat" | head -n 1); \
-      test -n "$SCRIPT"; \
-      chmod +x "$SCRIPT"; \
-      ln -sf "$SCRIPT" /usr/local/bin/cfm-run; \
-    fi
-
-WORKDIR ${APP_HOME}/bin
-ENTRYPOINT ["/usr/local/bin/cfm-run"]
+# /tmp is a tmpfs when pcap-watcher runs the worker with --read-only.
+WORKDIR /tmp
+ENTRYPOINT ["/opt/cicflowmeter/bin/cfm"]

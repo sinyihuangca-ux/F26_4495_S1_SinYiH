@@ -13,7 +13,7 @@ name: pcap-pipeline
 
 services:
   cicflowmeter-worker:
-    build: ./cicflowmeter
+    build: ./CICFlowMeter
     image: cicflowmeter-worker:latest
     platform: linux/amd64
     profiles: ["build"]

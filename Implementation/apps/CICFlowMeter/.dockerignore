@@ -1,0 +1,15 @@
+# Keep the build context to what the worker image needs.
+.git
+.gradle
+build
+out
+logs
+data
+*.iml
+.idea
+pom.xml
+
+# Only jnetpcap 1.4.r1425 for Linux is used (jar + libjnetpcap.so).
+jnetpcap/*.zip
+jnetpcap/win
+jnetpcap/linux/jnetpcap-1.3.0

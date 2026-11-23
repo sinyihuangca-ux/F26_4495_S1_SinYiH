@@ -42,27 +42,28 @@ public class Cmd {
         }else {
         }*/
 
+        // Exit codes (used by pcap-watcher): 0 = success, 1 = bad input / conversion error.
         if (args.length < 1) {
-            logger.info("Please select pcap!");
-            return;
+            logger.error("Please select pcap!");
+            System.exit(1);
         }
         pcapPath = args[0];
         File in = new File(pcapPath);
 
-        if(in==null || !in.exists()){
-            logger.info("The pcap file or folder does not exist! -> {}",pcapPath);
-            return;
+        if(!in.exists()){
+            logger.error("The pcap file or folder does not exist! -> {}",pcapPath);
+            System.exit(1);
         }
 
         if (args.length < 2) {
-            logger.info("Please select output folder!");
-            return;
+            logger.error("Please select output folder!");
+            System.exit(1);
         }
         outPath = args[1];
         File out = new File(outPath);
-        if (out == null || out.isFile()) {
-            logger.info("The out folder does not exist! -> {}",outPath);
-            return;
+        if (out.isFile()) {
+            logger.error("The out folder does not exist! -> {}",outPath);
+            System.exit(1);
         }
 
         logger.info("You select: {}",pcapPath);
@@ -74,7 +75,8 @@ public class Cmd {
         } else {
 
             if (!SwingUtils.isPcapFile(in)) {
-                logger.info("Please select pcap file!");
+                logger.error("Please select pcap file! (not a libpcap file, e.g. pcapng is not supported) -> {}", pcapPath);
+                System.exit(1);
             } else {
                 logger.info("CICFlowMeter received 1 pcap file");
                 readPcapFile(in.getPath(), outPath,flowTimeout,activityTimeout);
@@ -88,6 +90,10 @@ public class Cmd {
             return;
         }
         File[] pcapFiles = inputPath.listFiles(SwingUtils::isPcapFile);
+        if (pcapFiles == null) {
+            logger.error("Cannot list pcap folder -> {}", inputPath);
+            System.exit(1);
+        }
         int file_cnt = pcapFiles.length;
         System.out.println(String.format("CICFlowMeter found :%d pcap files", file_cnt));
         for(int i=0;i<file_cnt;i++) {
@@ -153,6 +159,11 @@ public class Cmd {
         }
 
         flowGen.dumpLabeledCurrentFlow(saveFileFullPath.getPath(), FlowFeature.getHeader());
+
+        if (!saveFileFullPath.isFile()) {
+            logger.error("Could not write flow file -> {}", saveFileFullPath.getPath());
+            System.exit(1);
+        }
 
         long lines = SwingUtils.countLines(saveFileFullPath.getPath());
 
