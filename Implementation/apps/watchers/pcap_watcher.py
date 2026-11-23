@@ -33,6 +33,14 @@ WORKER_CPUS = os.environ.get("WORKER_CPUS", "1")
 # Optional "uid:gid" to run the worker as. Empty = the image default (root, with all capabilities
 # dropped except DAC_OVERRIDE so it can read uploaded pcaps regardless of their owner).
 WORKER_USER = os.environ.get("WORKER_USER", "").strip()
+# Include IPv6 flows (passed to the worker as CFM_READ_IPV6). Off by default, like upstream CICFlowMeter.
+WORKER_READ_IPV6 = os.environ.get("WORKER_READ_IPV6", "false").lower() in ("1", "true", "yes")
+# A pcap without any 2+ packet flow gives a header-only CSV. By default it is not published to csvs/
+# (nothing to infer on); the pcap is still deleted. Set to true to publish it anyway.
+PUBLISH_EMPTY_CSV = os.environ.get("PUBLISH_EMPTY_CSV", "false").lower() in ("1", "true", "yes")
+
+# Accepted upload extensions; pcapng / nanosecond pcap are converted inside the worker (run-cfm.sh).
+PCAP_EXTENSIONS = (".pcap", ".pcapng", ".cap")
 
 STAGING_DIR_NAME = ".staging"
 FAILED_DIR_NAME = "failed"
@@ -86,11 +94,17 @@ def parse_pcap_path(pcap_path: Path) -> Optional[tuple[str, str, Path]]:
     user_id, comp_literal, computer_id, folder_name, filename = rel.parts
     if comp_literal != "comp" or folder_name != "pcaps":
         return None
-    if not filename.lower().endswith(".pcap"):
+    if not filename.lower().endswith(PCAP_EXTENSIONS) or filename.startswith("."):
         return None
 
     csv_dir = USERS_ROOT / user_id / "comp" / computer_id / "csvs"
     return user_id, computer_id, csv_dir
+
+
+def count_data_rows(csv_path: Path) -> int:
+    """Number of non-empty lines after the header."""
+    with csv_path.open("rb") as f:
+        return max(0, sum(1 for line in f if line.strip()) - 1)
 
 
 def unique_destination(directory: Path, name: str) -> Path:
@@ -166,6 +180,7 @@ def build_worker_cmd(container_name: str, user_id: str, computer_id: str, pcap_n
     ]
     if WORKER_USER:
         cmd += ["--user", WORKER_USER]
+    cmd += ["-e", f"CFM_READ_IPV6={'true' if WORKER_READ_IPV6 else 'false'}"]
     cmd += [DOCKER_IMAGE, f"{CONTAINER_PCAP_DIR}/{pcap_name}", CONTAINER_OUT_DIR]
     return cmd
 
@@ -307,7 +322,14 @@ class PcapProcessor:
             quarantine_pcap(pcap_path, f"CICFlowMeter produced no CSV ({produced.name})", output)
             return
 
-        final_csv = csv_dir / produced.name
+        if not PUBLISH_EMPTY_CSV and count_data_rows(produced) == 0:
+            pcap_path.unlink()
+            log.info("No flows in %s (header-only CSV); deleted PCAP without publishing a CSV", pcap_path)
+            return
+
+        # Never overwrite a CSV of the same name that the CSV watcher has not sent yet
+        # (e.g. the same pcap name uploaded twice).
+        final_csv = unique_destination(csv_dir, produced.name)
         os.replace(produced, final_csv)
         pcap_path.unlink()
         log.info("Generated %s and deleted PCAP: %s", final_csv, pcap_path)
@@ -327,8 +349,9 @@ class PcapEventHandler(FileSystemEventHandler):
 
 
 def scan_existing(processor: PcapProcessor) -> None:
-    for pcap_file in USERS_ROOT.glob("*/comp/*/pcaps/*.pcap"):
-        processor.submit(pcap_file)
+    for pcap_file in USERS_ROOT.glob("*/comp/*/pcaps/*"):
+        if pcap_file.name.lower().endswith(PCAP_EXTENSIONS):
+            processor.submit(pcap_file)
 
 
 def _handle_stop_signal(signum, _frame) -> None:

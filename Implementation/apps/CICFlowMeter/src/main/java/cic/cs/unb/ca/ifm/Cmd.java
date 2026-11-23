@@ -129,7 +129,8 @@ public class Cmd {
 
         FlowGenerator flowGen = new FlowGenerator(true, flowTimeout, activityTimeout);
         flowGen.addFlowListener(new FlowListener(fileName,outPath));
-        boolean readIP6 = false;
+        // IPv6 flows are off by default (original CICFlowMeter behaviour); set CFM_READ_IPV6=true to include them.
+        boolean readIP6 = "true".equalsIgnoreCase(System.getenv("CFM_READ_IPV6"));
         boolean readIP4 = true;
         PacketReader packetReader = new PacketReader(inputFile, readIP4, readIP6);
 

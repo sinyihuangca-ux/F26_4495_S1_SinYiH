@@ -40,6 +40,8 @@ services:
       WORKER_MEMORY: ${WORKER_MEMORY:-2g}
       WORKER_CPUS: ${WORKER_CPUS:-1}
       WORKER_USER: ${WORKER_USER:-}
+      WORKER_READ_IPV6: ${WORKER_READ_IPV6:-false}
+      PUBLISH_EMPTY_CSV: ${PUBLISH_EMPTY_CSV:-false}
 
   csv-inference-watcher:
     build:

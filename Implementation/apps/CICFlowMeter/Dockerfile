@@ -1,6 +1,7 @@
 # cicflowmeter-worker: short-lived container started by pcap-watcher.
-#   docker run ... cicflowmeter-worker:latest <pcap file> <output dir>
-# Writes <output dir>/<pcap file name>_Flow.csv; exits non-zero on failure.
+#   docker run ... cicflowmeter-worker:latest <pcap|pcapng file> <output dir>
+# Writes <output dir>/<file name>_Flow.csv; exits non-zero on failure.
+# Env: CFM_READ_IPV6=true to include IPv6 flows (off by default).
 
 # --- Stage 1: Build CICFlowMeter with Java 8 ---
 FROM ubuntu:22.04 AS builder
@@ -35,13 +36,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 ENV APP_HOME=/opt/cicflowmeter
 
+# wireshark-common provides editcap, used by run-cfm.sh to convert pcapng to pcap.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-8-jre-headless \
     libpcap0.8 \
+    wireshark-common \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/build/install/CICFlowMeter/ ${APP_HOME}/
 COPY docker/log4j-console.properties ${APP_HOME}/conf/log4j.properties
+COPY docker/run-cfm.sh ${APP_HOME}/bin/run-cfm.sh
 
 # Fail the build if the jnetpcap native library or its libpcap dependency is missing.
 RUN set -eux; \
@@ -49,7 +53,8 @@ RUN set -eux; \
     ldd ${APP_HOME}/lib/native/libjnetpcap.so; \
     if ldd ${APP_HOME}/lib/native/libjnetpcap.so | grep -q "not found"; then echo "unresolved native deps" >&2; exit 1; fi; \
     rm -f ${APP_HOME}/lib/native/*.dll; \
-    chmod +x ${APP_HOME}/bin/cfm
+    chmod +x ${APP_HOME}/bin/cfm ${APP_HOME}/bin/run-cfm.sh; \
+    command -v editcap
 
 # - absolute java.library.path (the start script's default "../lib/native" depends on the cwd);
 #   JAVA_OPTS comes after DEFAULT_JVM_OPTS in the start script, so it takes precedence
@@ -59,4 +64,4 @@ ENV JAVA_OPTS="-Djava.library.path=/opt/cicflowmeter/lib/native -Dlog4j.configur
 
 # /tmp is a tmpfs when pcap-watcher runs the worker with --read-only.
 WORKDIR /tmp
-ENTRYPOINT ["/opt/cicflowmeter/bin/cfm"]
+ENTRYPOINT ["/opt/cicflowmeter/bin/run-cfm.sh"]
