@@ -48,8 +48,13 @@ COPY docker/log4j-console.properties ${APP_HOME}/conf/log4j.properties
 COPY docker/run-cfm.sh ${APP_HOME}/bin/run-cfm.sh
 
 # Fail the build if the jnetpcap native library or its libpcap dependency is missing.
+# jnetpcap 1.4's libjnetpcap.so links against the unversioned "libpcap.so", which Ubuntu only ships
+# in libpcap-dev; point it at the runtime library from libpcap0.8 instead.
 RUN set -eux; \
     test -f ${APP_HOME}/lib/native/libjnetpcap.so; \
+    PCAP_SO="$(ls /usr/lib/x86_64-linux-gnu/libpcap.so.0.8)"; \
+    ln -sf "$PCAP_SO" /usr/lib/x86_64-linux-gnu/libpcap.so; \
+    ldconfig; \
     ldd ${APP_HOME}/lib/native/libjnetpcap.so; \
     if ldd ${APP_HOME}/lib/native/libjnetpcap.so | grep -q "not found"; then echo "unresolved native deps" >&2; exit 1; fi; \
     rm -f ${APP_HOME}/lib/native/*.dll; \
@@ -60,7 +65,7 @@ RUN set -eux; \
 #   JAVA_OPTS comes after DEFAULT_JVM_OPTS in the start script, so it takes precedence
 # - console-only logging so the worker can run with a read-only root filesystem
 # - size the heap from the container memory limit (docker run --memory)
-ENV JAVA_OPTS="-Djava.library.path=/opt/cicflowmeter/lib/native -Dlog4j.configuration=file:/opt/cicflowmeter/conf/log4j.properties -XX:MaxRAMPercentage=75 -Djava.io.tmpdir=/tmp"
+ENV JAVA_OPTS="-Djava.library.path=/opt/cicflowmeter/lib/native -Dlog4j.configuration=file:/opt/cicflowmeter/conf/log4j.properties -XX:MaxRAMPercentage=75.0 -Djava.io.tmpdir=/tmp"
 
 # /tmp is a tmpfs when pcap-watcher runs the worker with --read-only.
 WORKDIR /tmp
