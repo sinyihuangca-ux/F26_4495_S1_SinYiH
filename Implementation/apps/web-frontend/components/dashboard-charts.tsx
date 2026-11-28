@@ -1,144 +1,118 @@
 "use client";
 
-import { PieChart as PieIcon, LineChart as LineIcon } from "lucide-react";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-} from "recharts";
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Confusion } from "@/lib/api";
+import { useLive } from "@/lib/live";
 
-const DONUT_DATA = [
-  { name: "Normal Traffic", value: 1283204, color: "#0088FE" },
-  { name: "Anomaly Traffic", value: 13328, color: "#FF4D4D" },
-];
-
-const TIME_SERIES_DATA = [
-  { time: "14:00", normal: 2100, anomaly: 200 },
-  { time: "14:05", normal: 3100, anomaly: 180 },
-  { time: "14:10", normal: 3800, anomaly: 1200 },
-  { time: "14:15", normal: 2600, anomaly: 150 },
-  { time: "14:20", normal: 3200, anomaly: 220 },
-  { time: "14:25", normal: 2900, anomaly: 850 },
-  { time: "14:30", normal: 2700, anomaly: 180 },
-];
+const COLORS = { benign: "#10b981", suspicious: "#f59e0b", malicious: "#ef4444" };
+const tooltip = {
+  contentStyle: { backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: 8, fontSize: 12 },
+};
 
 export function DashboardCharts() {
-  return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      {/* Donut Chart: Traffic Ratio */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <PieIcon className="h-5 w-5 text-sky-400" />
-          <h3 className="font-semibold text-white">
-            Normal vs. Anomaly Traffic
-          </h3>
-        </div>
+  const { stats } = useLive();
+  const v = stats?.by_verdict ?? { benign: 0, suspicious: 0, malicious: 0 };
+  const total = v.benign + v.suspicious + v.malicious;
+  const donut = (Object.keys(COLORS) as (keyof typeof COLORS)[]).map((k) => ({ name: k, value: v[k] }));
+  const types = Object.entries(stats?.by_type ?? {})
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
 
-        <div className="flex flex-col sm:flex-row items-center justify-around h-56">
-          <div className="relative h-44 w-44">
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <h3 className="mb-2 font-semibold text-white">Traffic by final verdict</h3>
+        <div className="flex h-52 items-center justify-around">
+          <div className="relative h-40 w-40">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie
-                  data={DONUT_DATA}
-                  innerRadius={55}
-                  outerRadius={75}
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  {DONUT_DATA.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.color}
-                      stroke="#0B0F19"
-                      strokeWidth={2}
-                    />
+                <Pie data={total ? donut : [{ name: "none", value: 1 }]} innerRadius={50} outerRadius={70}
+                  paddingAngle={total ? 3 : 0} dataKey="value">
+                  {(total ? donut : [{ name: "none" }]).map((d) => (
+                    <Cell key={d.name} fill={COLORS[d.name as keyof typeof COLORS] ?? "#1e293b"} stroke="#0B0F19" />
                   ))}
                 </Pie>
+                {total > 0 && <Tooltip {...tooltip} />}
               </PieChart>
             </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold text-white">98.9%</span>
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-lg font-bold">
+              {total ? `${Math.round((v.benign / total) * 100)}%` : "—"}
             </div>
           </div>
-
-          <div className="flex flex-col gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full bg-[#0088FE]" />
-              <div>
-                <p className="text-slate-400">Normal Traffic</p>
-                <p className="font-bold text-white">1,283,204 (98.9%)</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full bg-[#FF4D4D]" />
-              <div>
-                <p className="text-slate-400">Anomaly Traffic</p>
-                <p className="font-bold text-white">13,328 (1.1%)</p>
-              </div>
-            </div>
-          </div>
+          <ul className="space-y-2 text-xs">
+            {donut.map((d) => (
+              <li key={d.name} className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full" style={{ background: COLORS[d.name as keyof typeof COLORS] }} />
+                <span className="capitalize text-slate-400">{d.name}</span>
+                <span className="font-semibold text-white">{d.value.toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 
-      {/* Line Chart: Flow Rate over Time */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <LineIcon className="h-5 w-5 text-sky-400" />
-            <h3 className="font-semibold text-white">Flow Rate over Time</h3>
-          </div>
-          <div className="flex items-center gap-4 text-xs">
-            <span className="flex items-center gap-1.5 text-sky-400">
-              <span className="h-0.5 w-3 bg-[#0088FE]" /> Normal Traffic
-            </span>
-            <span className="flex items-center gap-1.5 text-red-400">
-              <span className="h-0.5 w-3 bg-[#FF4D4D]" /> Anomaly Traffic
-            </span>
-          </div>
-        </div>
-
-        <div className="h-56 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={TIME_SERIES_DATA}>
-              <XAxis
-                dataKey="time"
-                stroke="#64748b"
-                fontSize={10}
-                tickLine={false}
-              />
-              <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#0f172a",
-                  borderColor: "#334155",
-                  borderRadius: "8px",
-                  fontSize: "12px",
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="normal"
-                stroke="#0088FE"
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="anomaly"
-                stroke="#FF4D4D"
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+        <h3 className="mb-2 font-semibold text-white">Threats by type</h3>
+        <div className="h-52">
+          {types.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={types} layout="vertical" margin={{ left: 10 }}>
+                <XAxis type="number" stroke="#64748b" fontSize={10} />
+                <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={10} width={110} />
+                <Tooltip {...tooltip} cursor={{ fill: "#1e293b" }} />
+                <Bar dataKey="count" fill="#ef4444" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="pt-20 text-center text-xs text-slate-500">No threats yet</p>
+          )}
         </div>
       </div>
+
+      <AccuracyPanel />
+    </div>
+  );
+}
+
+const pct = (x: number | null | undefined) => (x == null ? "—" : `${Math.round(x * 100)}%`);
+
+function Row({ name, c }: { name: string; c: Confusion | null }) {
+  return (
+    <tr className="border-t border-slate-800/60">
+      <td className="py-2 font-medium text-slate-300">{name}</td>
+      <td className="py-2 font-mono">{pct(c?.recall)}</td>
+      <td className="py-2 font-mono">{pct(c?.precision)}</td>
+      <td className="py-2 font-mono">{pct(c?.false_positive_rate)}</td>
+      <td className="py-2 font-mono text-slate-500">{c?.evaluated ?? 0}</td>
+    </tr>
+  );
+}
+
+// Scored against the dataset's Label column, which never affects the verdicts themselves.
+export function AccuracyPanel() {
+  const { stats } = useLive();
+  const a = stats?.accuracy;
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <h3 className="font-semibold text-white">Detection accuracy</h3>
+      <p className="mb-2 text-[11px] text-slate-500">Against the dataset labels · suspicious counts as a detection</p>
+      <table className="w-full text-left text-xs">
+        <thead className="text-[11px] uppercase text-slate-500">
+          <tr>
+            <th className="pb-1">Engine</th>
+            <th className="pb-1" title="Share of real attacks caught">Caught</th>
+            <th className="pb-1" title="Share of alerts that were real attacks">Precision</th>
+            <th className="pb-1" title="Share of normal flows wrongly flagged">False +</th>
+            <th className="pb-1">Flows</th>
+          </tr>
+        </thead>
+        <tbody>
+          <Row name="ML" c={a?.ml ?? null} />
+          <Row name="AI (reviewed only)" c={a?.ai ?? null} />
+          <Row name="Combined" c={a?.combined ?? null} />
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -62,7 +62,7 @@ export default function LandingPage() {
               size="lg"
               className="w-full sm:w-auto bg-sky-600 hover:bg-sky-500 text-white font-medium px-8 shadow-lg shadow-sky-950/50"
             >
-              <Link href="/register">
+              <Link href="/dashboard">
                 Start Free Trial
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>

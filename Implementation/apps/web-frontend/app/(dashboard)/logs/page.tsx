@@ -1,160 +1,152 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, FileText, Search, ShieldAlert, Trash2 } from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
+import { Download, Search, ShieldAlert, Trash2 } from "lucide-react";
+import { AccuracyPanel } from "@/components/dashboard-charts";
+import { FlowTable } from "@/components/flow-table";
+import { ThreatBriefing } from "@/components/threat-briefing";
+import { api, Flow, httpBase } from "@/lib/api";
+import { useLive } from "@/lib/live";
 
-interface LogEntry {
-  id: string;
-  timestamp: string;
-  label: string;
-  destination_port: number;
-  score: number;
-}
+// Threats and the audit log on one page: what was detected, the AI advisor's take,
+// and every flagged flow with analyst feedback controls.
 
-export default function LogsPage() {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+const FILTERS = [
+  { id: "review", label: "Needs review" },
+  { id: "alerts", label: "All alerts" },
+  { id: "malicious", label: "Malicious" },
+  { id: "suspicious", label: "Suspicious" },
+  { id: "disagree", label: "ML ≠ AI" },
+  { id: "all", label: "All flows" },
+] as const;
+type FilterId = (typeof FILTERS)[number]["id"];
+
+// Where a human is most useful: the engines disagree, or the call is only "suspicious",
+// and nobody has marked it yet.
+const needsReview = (f: Flow) =>
+  !f.feedback && f.final_verdict !== "benign" && (f.agreement === "disagree" || f.final_verdict === "suspicious");
+
+export default function ThreatsAndLogsPage() {
+  const { getToken } = useAuth();
+  const { alerts, stats, refresh } = useLive();
+  const [filter, setFilter] = useState<FilterId>("review");
   const [search, setSearch] = useState("");
+  const [flows, setFlows] = useState<Flow[]>([]);
+  const [error, setError] = useState("");
 
-  // Load existing logs from localStorage on mount and listen to WebSocket stream
+  const types = Object.entries(stats?.by_type ?? {}).sort((a, b) => b[1] - a[1]);
+
+  // Re-query whenever the filter changes or new data arrives over the live feed.
+  const liveVersion = `${stats?.total_flows ?? 0}-${alerts.length}-${alerts[0]?.id ?? 0}`;
   useEffect(() => {
-    const savedLogs = JSON.parse(localStorage.getItem("SECURITY_LOG_HISTORY") || "[]");
-    setLogs(savedLogs);
+    const params = new URLSearchParams({ limit: "1000" });
+    if (["review", "alerts", "disagree"].includes(filter)) params.set("alerts_only", "true");
+    if (filter === "malicious" || filter === "suspicious") params.set("verdict", filter);
+    if (search) params.set("q", search);
+    const t = setTimeout(() => {
+      api<Flow[]>(`/api/flows?${params}`)
+        .then((rows) => {
+          setFlows(
+            filter === "disagree" ? rows.filter((r) => r.agreement === "disagree")
+              : filter === "review" ? rows.filter(needsReview)
+              : rows,
+          );
+          setError("");
+        })
+        .catch((e) => setError(e.message));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [filter, search, liveVersion]);
 
-    const savedIp = localStorage.getItem("SECURITY_BACKEND_IP") || "localhost:8000";
-    const formattedHost = savedIp.replace(/^https?:\/\//, "").replace(/^ws:\/\//, "").trim();
-    const wsUrl = `ws://${formattedHost}/ws/alerts`;
+  // Show AI updates and feedback for rows already on screen without waiting for the next query.
+  const merged = flows.map((f) => alerts.find((a) => a.id === f.id) ?? f);
+  const shown = filter === "review" ? merged.filter(needsReview) : merged;
 
-    const ws = new WebSocket(wsUrl);
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "ATTACK_DETECTED") {
-        const newLog: LogEntry = {
-          id: Math.random().toString(36).substring(2, 9),
-          timestamp: data.timestamp || new Date().toLocaleString(),
-          label: data.label || "Anomaly",
-          destination_port: data.destination_port ?? 80,
-          score: data.score ?? 0,
-        };
-
-        setLogs((prev) => {
-          const updated = [newLog, ...prev];
-          localStorage.setItem("SECURITY_LOG_HISTORY", JSON.stringify(updated));
-          return updated;
-        });
-      }
-    };
-
-    return () => ws.close();
-  }, []);
-
-  const clearLogs = () => {
-    if (confirm("Are you sure you want to clear all audit logs?")) {
-      setLogs([]);
-      localStorage.removeItem("SECURITY_LOG_HISTORY");
+  const clearAll = async () => {
+    if (!confirm("Delete every stored flow, alert and AI briefing? This can't be undone.")) return;
+    try {
+      await api("/api/flows", { method: "DELETE" }, await getToken());
+      setFlows([]);
+      refresh();
+    } catch (e) {
+      setError((e as Error).message);
     }
   };
 
-  const exportToCSV = () => {
-    if (logs.length === 0) return;
-
-    const headers = ["Timestamp", "Attack Type", "Destination Port", "Anomaly Score"];
-    const rows = logs.map((log) => [
-      `"${log.timestamp}"`,
-      `"${log.label}"`,
-      log.destination_port,
-      log.score.toFixed(4),
-    ]);
-
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `security_audit_logs_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const filteredLogs = logs.filter(
-    (log) =>
-      log.label.toLowerCase().includes(search.toLowerCase()) ||
-      log.destination_port.toString().includes(search)
-  );
-
   return (
-    <div className="p-8 space-y-8 bg-slate-950 min-h-screen text-slate-100">
-      {/* Header & Export Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-800 pb-4">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-2">
-            <FileText className="text-blue-400" /> Security Audit Logs
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            <ShieldAlert className="text-red-400" /> Threats &amp; logs
           </h1>
-          <p className="text-sm text-slate-400 mt-1">Persistent event ledger for audit tracking and export</p>
+          <p className="text-sm text-slate-400">
+            What was detected, what the AI thinks it is, and every flagged flow. Mark false positives to improve the next training run.
+          </p>
         </div>
-        <div className="mt-4 sm:mt-0 flex items-center gap-3">
-          <button
-            onClick={clearLogs}
-            disabled={logs.length === 0}
-            className="flex items-center gap-2 bg-red-950/40 border border-red-800/60 hover:bg-red-900/40 text-red-400 disabled:opacity-50 px-3 py-2 rounded-lg text-sm font-medium transition"
-          >
-            <Trash2 size={16} /> Clear Logs
+        <div className="flex gap-2">
+          <button onClick={clearAll}
+            className="flex items-center gap-2 rounded-lg border border-red-800/60 bg-red-950/40 px-3 py-2 text-sm text-red-400 hover:bg-red-900/40">
+            <Trash2 size={16} /> Clear
           </button>
-
-          <button
-            onClick={exportToCSV}
-            disabled={logs.length === 0}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 px-4 py-2 rounded-lg text-sm font-medium transition"
-          >
-            <Download size={16} /> Export to CSV ({logs.length})
-          </button>
+          <a href={`${httpBase()}/api/flows/export.csv?alerts_only=${filter !== "all"}`}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500">
+            <Download size={16} /> Export CSV
+          </a>
         </div>
       </div>
 
-      {/* Search Filter */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-3 text-slate-500" size={16} />
-        <input
-          type="text"
-          placeholder="Filter logs by attack type or port..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-        />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+          <h3 className="mb-3 font-semibold text-white">Active threat types</h3>
+          {types.length === 0 ? (
+            <p className="text-xs text-slate-500">None detected.</p>
+          ) : (
+            <ul className="space-y-2">
+              {types.map(([name, n]) => (
+                <li key={name} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-300">{name}</span>
+                  <span className="font-mono text-red-400">{n}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <AccuracyPanel />
       </div>
 
-      {/* Logs Table */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-        <table className="w-full text-left text-sm text-slate-300">
-          <thead className="bg-slate-800/50 text-slate-400 uppercase text-xs">
-            <tr>
-              <th className="p-4">Timestamp</th>
-              <th className="p-4">Attack Type</th>
-              <th className="p-4">Destination Port</th>
-              <th className="p-4">Anomaly Score</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800">
-            {filteredLogs.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="p-12 text-center text-slate-500 font-medium">
-                  No log entries recorded yet. Run your attack simulator to stream threats!
-                </td>
-              </tr>
-            ) : (
-              filteredLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-slate-800/30 transition">
-                  <td className="p-4 text-slate-400 font-mono text-xs">{log.timestamp}</td>
-                  <td className="p-4 font-bold text-red-400 flex items-center gap-2">
-                    <ShieldAlert size={14} /> {log.label}
-                  </td>
-                  <td className="p-4 font-mono">{log.destination_port}</td>
-                  <td className="p-4 font-mono text-slate-300">{log.score.toFixed(4)}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <ThreatBriefing />
+
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <h3 className="font-semibold text-white">Audit log</h3>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex flex-wrap gap-1">
+              {FILTERS.map((f) => (
+                <button key={f.id} onClick={() => setFilter(f.id)}
+                  className={`rounded-lg px-3 py-1.5 text-xs ${filter === f.id
+                    ? "border border-sky-500/40 bg-sky-600/20 text-sky-300"
+                    : "border border-slate-800 text-slate-400 hover:bg-slate-900"}`}>
+                  {f.label}{f.id === filter && shown.length > 0 ? ` (${shown.length})` : ""}
+                </button>
+              ))}
+            </div>
+            <div className="relative sm:w-64">
+              <Search className="absolute left-3 top-2.5 text-slate-500" size={15} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="IP, port, attack type or label…"
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 py-2 pl-9 pr-3 text-sm placeholder-slate-500 focus:border-blue-500 focus:outline-none" />
+            </div>
+          </div>
+        </div>
+        {filter === "review" && (
+          <p className="mb-3 text-[11px] text-slate-500">
+            Suspicious flows and flows where ML and AI disagree that nobody has marked yet. Your decision is saved and used when you retrain.
+          </p>
+        )}
+        {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
+        <FlowTable flows={shown} />
       </div>
     </div>
   );

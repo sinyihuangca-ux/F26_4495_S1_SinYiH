@@ -4,18 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  FileText,
   ShieldAlert,
-  Box,
   Settings,
   Shield,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Logs", icon: FileText, href: "/logs" },
-  { label: "Threats", icon: ShieldAlert, href: "/threats" },
-  { label: "Containers", icon: Box, href: "/containers" },
+  { label: "Threats & Logs", icon: ShieldAlert, href: "/logs" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
 
@@ -23,16 +19,16 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-screen w-60 flex-col border-r border-slate-800 bg-slate-950/80 p-4 text-slate-300">
+    <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-950/80 p-4 text-slate-300">
       {/* Brand Header */}
       <div className="mb-8 flex items-center gap-3 px-2">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 shadow-lg shadow-sky-950/50">
           <Shield className="h-6 w-6 text-white fill-white/20" />
         </div>
         <div>
-          <span className="font-bold text-white tracking-wide">AI</span>
+          <span className="font-bold text-white tracking-wide">AI Threat</span>
           <span className="text-xs text-sky-400 block font-medium">
-            {process.env.NEXT_PUBLIC_APP_NAME}
+            {process.env.NEXT_PUBLIC_APP_NAME || "Mitigation"}
           </span>
         </div>
       </div>
